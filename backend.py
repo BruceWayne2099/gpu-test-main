@@ -19,12 +19,12 @@ app = Flask(__name__)
 DB_PATH = "/app/data/chat_history.db"
 KNOWLEDGE_DIR = "/app/data/knowledge/"
 # 分流地址
-OLLAMA_CPU_API = "http://ollama-svc:11434/api/generate"
+OLLAMA_CPU_API = "http://ollama-70b-svc:11434/api/generate" 
 OLLAMA_GPU_API = "http://ollama-gpu-svc:11434/api/generate"
 # 模型定义
 PRIMARY_MODEL = "llama3:70b"   # CPU 跑逻辑
 BACKUP_MODEL = "qwen2.5:7b"    # CPU 备用
-VISION_MODEL = "llava:latest"   # GPU 跑识图，这里注意用的是llava
+VISION_MODEL = "qwen3.5:latest"   # GPU 跑识图，这里注意用的是qwen3.5
 # 图片目录（对应之前的挂载）
 IMAGE_DIR = "/app/user-images/"
 
@@ -124,82 +124,83 @@ def aigpt_api():
     user_prompt = urllib.parse.unquote(raw_prompt)
     image_name = request.args.get('image', '')
 
-    final_response = ""
-    used_model = ""
-
-    # --- 场景 1：图片识图逻辑 (GPU) ---
+    # --- 阶段 1：视觉解析 (如果是图片上传) ---
+    visual_description = ""
     if image_name:
         img_path = os.path.join(IMAGE_DIR, image_name)
-        print(f">>> [SRE Debug] 尝试访问图片路径: {img_path}")
-        
-        # 再次确认文件物理存在
-        if not os.path.exists(img_path):
-            print(f">>> [SRE Error] 路径确实不存在: {img_path}")
-            return jsonify({"response": f"❌ 后端未找到文件: {image_name}"})
-
-        try:
-            with open(img_path, "rb") as f:
-                img_base64 = base64.b64encode(f.read()).decode('utf-8')
-            
-            # 请求 GPU 节点
-            r = requests.post(OLLAMA_GPU_API, json={
-                "model": VISION_MODEL,
-                "prompt": f"请作为 SRE 专家识别此图并回答：{user_prompt}",
-                "images": [img_base64],
-                "stream": False
-            }, timeout=120)
-            
-            res_text = r.json().get('response', '')
-            
-            # 识图完直接在这里存数据库并返回！不要往下走了
-            save_history(f"[图片:{image_name}] {user_prompt}", res_text, VISION_MODEL)
-            return jsonify({"response": f"🚀 [GPU识图]\n\n{res_text}"})
-            
-        except Exception as e:
-            print(f">>> [SRE Error] 识图过程崩溃: {e}")
-            return jsonify({"response": f"识图链路故障: {e}"})
-
-    # --- 场景 2：纯文字逻辑 (CPU 70B + RAG) ---
-    else:
-        knowledge_context = get_semantic_context(user_prompt)
-        final_prompt = (
-            f"你是一位拥有 10 年经验的 TNS 资深 SRE。请严格参考以下内部文档回答问题。\n"
-            f"【内部参考资料】:\n{knowledge_context}\n\n"
-            f"【用户提问】: {user_prompt}\n"
-            f"请用中文专业回答。"
-        ) if knowledge_context else f"你是一位资深 SRE 专家，请用中文回答: {user_prompt}"
-        
-        target_api = OLLAMA_CPU_API
-        for model in [PRIMARY_MODEL, BACKUP_MODEL]:
+        if os.path.exists(img_path):
             try:
-                r = requests.post(target_api, json={
-                    "model": model,
-                    "prompt": final_prompt,
+                with open(img_path, "rb") as f:
+                    img_base64 = base64.b64encode(f.read()).decode('utf-8')
+                
+                print(f">>> [SRE Pipeline] 正在请求 GPU 节点解析图片...")
+                # 识图 Prompt 引导它提取关键词
+                vision_prompt = "请描述这张图里的关键信息（人物、报错代码、故障现象等），以便我进行知识库检索。"
+                r_vision = requests.post(OLLAMA_GPU_API, json={
+                    "model": VISION_MODEL,
+                    "prompt": vision_prompt,
+                    "images": [img_base64],
                     "stream": False
-                }, timeout=(5, 300))
-                if r.status_code == 200:
-                    used_model = model
-                    final_response = r.json().get('response', '')
-                    break
+                }, timeout=60)
+                
+                visual_description = r_vision.json().get('response', '')
+                print(f">>> [SRE Pipeline] 视觉解析结果: {visual_description}")
             except Exception as e:
-                continue
+                print(f">>> [SRE Error] 识图失败: {e}")
+                visual_description = "[图片解析失败]"
 
-    # --- 统一持久化结果 ---
+    # --- 阶段 2：语义检索 (RAG) ---
+    # 这一步是关键！如果识图成功，就把“视觉描述”和“用户提问”合起来去搜向量库
+    search_query = f"{visual_description} {user_prompt}".strip()
+    knowledge_context = get_semantic_context(search_query)
+    
+    # --- 阶段 3：终极逻辑生成 (CPU 70B) ---
+    # 构造给 70B 的终极 Prompt
+    if visual_description:
+        # 如果有图，告诉 70B 眼睛看到了什么
+        final_prompt = (
+            f"你是一位拥有 10 年经验的 TNS 资深 SRE。\n"
+            f"【视觉观察结果】: {visual_description}\n"
+            f"【内部参考资料】: \n{knowledge_context}\n\n"
+            f"【用户提问】: {user_prompt}\n"
+            f"请结合视觉观察和内部参考资料，给出中文专业回答。"
+        )
+    else:
+        # 纯文本 RAG
+        final_prompt = (
+            f"你是一位 TNS 资深 SRE。请参考资料回答问题。\n"
+            f"【内部参考资料】: \n{knowledge_context}\n\n"
+            f"【提问】: {user_prompt}"
+        )
+
+    # 发送给 Master 节点的 70B
+    final_response = ""
+    used_model = ""
+    for model in [PRIMARY_MODEL, BACKUP_MODEL]:
+        try:
+            print(f">>> [SRE Pipeline] 正在请求 Master 节点 {model} 进行终极推理...")
+            r = requests.post(OLLAMA_CPU_API, json={
+                "model": model,
+                "prompt": final_prompt,
+                "stream": False
+            }, timeout=(5, 300))
+            if r.status_code == 200:
+                used_model = model
+                final_response = r.json().get('response', '')
+                break
+        except Exception as e:
+            print(f">>> [SRE Error] {model} 推理超时或失败，尝试备用方案...")
+            continue
+
+    # --- 结果持久化与返回 ---
     if not final_response:
-        return jsonify({"response": "后端推理服务连接失败，请检查各节点状态"}), 500
+        return jsonify({"response": "❌ 后端链路中断，请检查 SRE 算力集群"}), 500
 
-    # --- 结果持久化与标识 ---
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT INTO history (prompt, response, model, time) VALUES (?, ?, ?, ?)",
-                        (user_prompt if not image_name else f"[图片:{image_name}] {user_prompt}", 
-                         final_response, used_model, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    except: pass
+    # 存储到 SQLite 历史记录
+    save_history(f"[图文联动:{image_name}] {user_prompt}", final_response, used_model)
 
-    display_prompt = f"[图片:{image_name}] {user_prompt}" if image_name else user_prompt
-    save_history(display_prompt, final_response, used_model)
-
-    tag = "🚀 [GPU识图]" if image_name else f"🔥 [70B+RAG]" if used_model == PRIMARY_MODEL else "💡 [Qwen]"
+    # 标识结果来源
+    tag = "🤖 [图文联动 RAG]" if image_name else "🔥 [纯文 RAG]"
     return jsonify({"response": f"{tag}\n\n{final_response}"})
 
 # 保持原有路由不变 (index, search, init_db)
