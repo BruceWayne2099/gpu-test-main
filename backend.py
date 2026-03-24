@@ -29,7 +29,7 @@ VISION_MODEL = "llava:latest"   # GPU 跑识图
 IMAGE_DIR = "/app/user-images/"
 
 # --- 1. 自动化向量索引构建 (保持原有逻辑) ---
-print(">>> 正在初始化语义向量引擎...")
+print(">>> 正在初始化语义向量引擎，请稍等...")
 embed_model = SentenceTransformer('/app/model_file/')
 vector_index = None
 all_chunks = []
