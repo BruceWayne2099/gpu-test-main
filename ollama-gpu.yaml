@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-gpu
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama-gpu
+  template:
+    metadata:
+      labels:
+        app: ollama-gpu
+    spec:
+      nodeSelector:
+        accelerator: nvidia-t4  # 定向投送到 GPU 机器
+      containers:
+      - name: ollama
+        image: ollama/ollama:latest # 如果官方更新了镜像，可能这里跑的ollama-gpu的版本跟ollama-70B的版本会不一致
+        imagePullPolicy: IfNotPresent  
+        ports:
+        - containerPort: 11434
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: "compute,utility"
+        resources:
+          limits:
+            nvidia.com/gpu: 1 # 核心指令：索要显卡
+        volumeMounts:
+        - name: ollama-storage
+          mountPath: /root/.ollama
+      volumes:
+      - name: ollama-storage
+        hostPath:
+          path: /data00/k3s/ollama-models # 直接挂载 GPU 机器的 500G 大盘路径
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-gpu-svc
+spec:
+  selector:
+    app: ollama-gpu
+  ports:
+  - protocol: TCP
+    port: 11434
+    targetPort: 11434
