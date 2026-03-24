@@ -129,17 +129,19 @@ def aigpt_api():
 
     # --- 场景 1：图片识图逻辑 (GPU) ---
     if image_name:
-        used_model = VISION_MODEL
         img_path = os.path.join(IMAGE_DIR, image_name)
-        print(f">>> [SRE Log] 正在检索路径: {img_path}")
+        print(f">>> [SRE Debug] 尝试访问图片路径: {img_path}")
         
+        # 再次确认文件物理存在
         if not os.path.exists(img_path):
-            return jsonify({"response": f"❌ 错误：后端未找到图片 {image_name}，请重新上传。"})
+            print(f">>> [SRE Error] 路径确实不存在: {img_path}")
+            return jsonify({"response": f"❌ 后端未找到文件: {image_name}"})
 
         try:
             with open(img_path, "rb") as f:
                 img_base64 = base64.b64encode(f.read()).decode('utf-8')
             
+            # 请求 GPU 节点
             r = requests.post(OLLAMA_GPU_API, json={
                 "model": VISION_MODEL,
                 "prompt": f"请作为 SRE 专家识别此图并回答：{user_prompt}",
@@ -147,9 +149,15 @@ def aigpt_api():
                 "stream": False
             }, timeout=120)
             
-            final_response = r.json().get('response', '') # 赋值给统一变量
+            res_text = r.json().get('response', '')
+            
+            # 识图完直接在这里存数据库并返回！不要往下走了
+            save_history(f"[图片:{image_name}] {user_prompt}", res_text, VISION_MODEL)
+            return jsonify({"response": f"🚀 [GPU识图]\n\n{res_text}"})
+            
         except Exception as e:
-            return jsonify({"response": f"识图链路故障: {e}"}), 500
+            print(f">>> [SRE Error] 识图过程崩溃: {e}")
+            return jsonify({"response": f"识图链路故障: {e}"})
 
     # --- 场景 2：纯文字逻辑 (CPU 70B + RAG) ---
     else:
