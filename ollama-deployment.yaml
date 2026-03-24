@@ -2,26 +2,36 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ollama
+  name: ollama-70b
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ollama
+      app: ollama-70b
   template:
     metadata:
       labels:
-        app: ollama
+        app: ollama-70b
     spec:
-      runtimeClassName: nvidia 
+      # --- 关键修改 1：定向投送到 Master 节点 ---
       nodeSelector:
-        accelerator: nvidia-t4
+        node-role.kubernetes.io/control-plane: "true"
+      
       containers:
       - name: ollama
         image: ollama/ollama:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 11434
+        # --- 关键修改 2：取消 GPU 相关环境变量和运行时 ---
+        # 不再需要 runtimeClassName: nvidia
+        resources:
+          requests:
+            cpu: "8"      # Master 有 32 核，给 8 核很大方了
+            memory: "48Gi" # 70B 4-bit 量化版约需 40G，给 48G 留点 Buffer
+          limits:
+            cpu: "24"     # 允许压榨更多 CPU 来加速推理
+            memory: "64Gi"
         volumeMounts:
         - name: ollama-models
           mountPath: /root/.ollama
@@ -29,18 +39,6 @@ spec:
           mountPath: /app/data/knowledge
           subPath: knowledge
           readOnly: true
-        - name: nfs-ai-demo
-          mountPath: /app/user-images
-          subPath: user-images
-        resources:
-          requests:
-            cpu: "8"
-            memory: "16Gi"
-            nvidia.com/gpu: 1 
-          limits:
-            cpu: "24"
-            memory: "64Gi"
-            nvidia.com/gpu: 1
       volumes:
       - name: ollama-models
         hostPath:
@@ -48,16 +46,16 @@ spec:
           type: DirectoryOrCreate
       - name: nfs-ai-demo
         hostPath:
-          path: /data00/shared_storage/ai-demo 
-          type: Directory 
+          path: /data00/shared_storage/ai-demo
+          type: Directory
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ollama-svc
+  name: ollama-70b-svc # 改个名，方便 backend 区分调用
 spec:
   selector:
-    app: ollama
+    app: ollama-70b
   ports:
   - port: 11434
     targetPort: 11434
