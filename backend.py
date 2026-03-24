@@ -24,7 +24,7 @@ OLLAMA_GPU_API = "http://ollama-gpu-svc:11434/api/generate"
 # 模型定义
 PRIMARY_MODEL = "llama3:70b"   # CPU 跑逻辑
 BACKUP_MODEL = "qwen2.5:7b"    # CPU 备用
-VISION_MODEL = "llava:latest"   # GPU 跑识图
+VISION_MODEL = "llava:latest"   # GPU 跑识图，这里注意用的是llava
 # 图片目录（对应之前的挂载）
 IMAGE_DIR = "/app/user-images/"
 
