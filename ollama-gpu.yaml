@@ -12,11 +12,12 @@ spec:
       labels:
         app: ollama-gpu
     spec:
+      runtimeClassName: nvidia 
       nodeSelector:
-        accelerator: nvidia-t4  # 定向投送到 GPU 机器
+        accelerator: nvidia-t4
       containers:
       - name: ollama
-        image: ollama/ollama:latest # 如果官方更新了镜像，可能这里跑的ollama-gpu的版本跟ollama-70B的版本会不一致
+        image: ollama/ollama:latest 
         imagePullPolicy: IfNotPresent  
         ports:
         - containerPort: 11434
@@ -26,16 +27,36 @@ spec:
         - name: NVIDIA_DRIVER_CAPABILITIES
           value: "compute,utility"
         resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+            nvidia.com/gpu: 1
           limits:
-            nvidia.com/gpu: 1 # 核心指令：索要显卡
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: 1
         volumeMounts:
+        # --- 所有的挂载必须放在同一个 volumeMounts 列表下 ---
         - name: ollama-storage
           mountPath: /root/.ollama
+        - name: nfs-ai-demo
+          mountPath: /app/data/knowledge
+          subPath: knowledge
+          readOnly: true
+        - name: nfs-ai-demo
+          mountPath: /app/user-images
+          subPath: user-images
       volumes:
+      # --- 所有的卷定义必须放在同一个 volumes 列表下 ---
       - name: ollama-storage
         hostPath:
-          path: /data00/k3s/ollama-models # 直接挂载 GPU 机器的 500G 大盘路径
+          path: /data00/k3s/ollama-models
           type: DirectoryOrCreate
+      - name: nfs-ai-demo
+        hostPath:
+          # 指向你 Master 节点同步过来的 NFS 共享路径
+          path: /mnt/shared_storage/ai-demo 
+          type: Directory
 ---
 apiVersion: v1
 kind: Service

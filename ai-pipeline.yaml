@@ -13,23 +13,26 @@ spec:
         app: ai-backend
     spec:
       nodeSelector:
-        accelerator: nvidia-t4 #强制这个pod去GPU，因为图片是要落在GPU的数据盘里。
+        node-role.kubernetes.io/control-plane: "true" 
+      
       containers:
       - name: backend
-        image: ai-backend:v19
-        imagePullPolicy: IfNotPresent # 这样k3s会现在本地docker找，找到直接干活
+        image: ai-backend:v24 
+        imagePullPolicy: IfNotPresent 
         ports:
         - containerPort: 5000
         - containerPort: 8000
         volumeMounts:
-          - name: nfs-storage
-            mountPath: /app/data/knowledge # 知识库文档
+          # --- 名称必须与下面的 volumes 保持一致 ---
+          - name: nfs-ai-demo
+            mountPath: /app/data/knowledge
             subPath: knowledge
-          - name: nfs-storage
-            mountPath: /app/model_file # 语义向量模型路径
+            readOnly: true
+          - name: nfs-ai-demo
+            mountPath: /app/model_file
             subPath: model_file
-          - name: nfs-storage
-            mountPath: /app/user-images # 用户上传的图片路径
+          - name: nfs-ai-demo
+            mountPath: /app/user-images
             subPath: user-images  
         resources:
           requests:
@@ -39,11 +42,11 @@ spec:
             cpu: "4"
             memory: "16Gi"
       volumes:
-      - name: nfs-storage
-        hostPath:
-          path: /mnt/shared_storage/ai-demo
-          type: Directory
-
+        # --- 统一名称为 nfs-ai-demo ---
+        - name: nfs-ai-demo
+          hostPath:
+            path: /data00/shared_storage/ai-demo 
+            type: Directory
 ---
 apiVersion: v1
 kind: Service

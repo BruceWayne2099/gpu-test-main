@@ -13,6 +13,9 @@ spec:
       labels:
         app: ollama
     spec:
+      runtimeClassName: nvidia 
+      nodeSelector:
+        accelerator: nvidia-t4
       containers:
       - name: ollama
         image: ollama/ollama:latest
@@ -22,18 +25,31 @@ spec:
         volumeMounts:
         - name: ollama-models
           mountPath: /root/.ollama
+        - name: nfs-ai-demo
+          mountPath: /app/data/knowledge
+          subPath: knowledge
+          readOnly: true
+        - name: nfs-ai-demo
+          mountPath: /app/user-images
+          subPath: user-images
         resources:
           requests:
             cpu: "8"
             memory: "16Gi"
+            nvidia.com/gpu: 1 
           limits:
             cpu: "24"
             memory: "64Gi"
+            nvidia.com/gpu: 1
       volumes:
       - name: ollama-models
         hostPath:
           path: /data00/shared_storage/ollama-models/
-          type: DirectoryOrCreate  
+          type: DirectoryOrCreate
+      - name: nfs-ai-demo
+        hostPath:
+          path: /data00/shared_storage/ai-demo 
+          type: Directory 
 ---
 apiVersion: v1
 kind: Service
