@@ -136,58 +136,67 @@
 
     // 发送消息核心逻辑
     async function send() {
-    const input = document.getElementById('user-input');
-    const fileInput = document.getElementById('file-input');
-    const prompt = input.value.trim();
-    
-    if (!prompt && !currentImageName) return;
-
-    // 1. UI 表现
-    const displayPrompt = currentImageName ? `[图片:${currentImageName}] ${prompt}` : prompt;
-    appendMessage('user', displayPrompt);
-    input.value = '';
-
-    // 2. 思考中...
-    const box = document.getElementById('chat-box');
-    const aiMsg = document.createElement('div');
-    aiMsg.className = "flex justify-start italic text-slate-400 blinking";
-    aiMsg.innerHTML = `<div class="bg-slate-50 p-3 rounded-lg border border-dashed border-slate-300">AIOps 大脑正在思考中...</div>`;
-    box.appendChild(aiMsg);
-    box.scrollTop = box.scrollHeight;
-
-    try {
-        let finalImageName = "";
+        const input = document.getElementById('user-input');
+        const fileInput = document.getElementById('file-input');
+        const prompt = input.value.trim();
         
-        // 3. 【核心修正】如果有图片，必须先执行上传动作
-        if (fileInput.files.length > 0) {
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            
-            const uploadRes = await fetch('/upload', { method: 'POST', body: formData });
-            const uploadData = await uploadRes.json();
-            if (uploadData.status === 'success') {
-                finalImageName = uploadData.filename;
-                console.log("图片上传成功:", finalImageName);
-            } else {
-                throw new Error("图片上传失败");
+        // 如果既没说话也没传图，直接返回
+        if (!prompt && fileInput.files.length === 0) return;
+
+        // 1. UI 预处理
+        const tempFileName = fileInput.files.length > 0 ? fileInput.files[0].name : "";
+        appendMessage('user', tempFileName ? `[图片:${tempFileName}] ${prompt}` : prompt);
+        input.value = '';
+
+        // 2. 思考中状态
+        const box = document.getElementById('chat-box');
+        const aiMsg = document.createElement('div');
+        aiMsg.className = "flex justify-start italic text-slate-400 blinking";
+        aiMsg.innerHTML = `<div class="bg-slate-50 p-3 rounded-lg border border-dashed border-slate-300">SRE 系统处理中...</div>`;
+        box.appendChild(aiMsg);
+        box.scrollTop = box.scrollHeight;
+
+        try {
+            let serverFileName = "";
+
+            // 3. 【关键步骤】物理上传
+            if (fileInput.files.length > 0) {
+                console.log(">>> [SRE Debug] 开始上传文件:", fileInput.files[0].name);
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+
+                const upRes = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const upData = await upRes.json();
+
+                if (upData.status === 'success') {
+                    serverFileName = upData.filename; // 拿后端确认存好的名字
+                    console.log(">>> [SRE Debug] 后端已成功存储:", serverFileName);
+                } else {
+                    throw new Error("后端接收文件失败: " + upData.error);
+                }
             }
+
+            // 4. 发起 AI 分析请求
+            const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(serverFileName)}`;
+            const res = await fetch(url);
+            const data = await res.json();
+
+            // 5. 渲染结果
+            box.removeChild(aiMsg);
+            appendMessage('ai', data.response);
+            
+            // 6. 清理，准备下一轮
+            clearImage();
+
+        } catch (e) {
+            aiMsg.innerHTML = `<div class="bg-red-50 text-red-600 p-3 rounded border border-red-300">❌ 错误: ${e.message}</div>`;
+            aiMsg.classList.remove('blinking');
+            console.error(">>> [SRE Error] 链路故障:", e);
         }
-
-        // 4. 调用分析接口
-        const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(finalImageName)}`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        box.removeChild(aiMsg);
-        appendMessage('ai', data.response);
-        updateStatusLights(data.response);
-        clearImage();
-
-    } catch (e) {
-        aiMsg.innerHTML = `<div class="bg-red-50 text-red-600 p-3 rounded border border-red-300">❌ 故障: ${e.message}</div>`;
-        aiMsg.classList.remove('blinking');
     }
-}
 
     // 搜索逻辑
     async function searchHistory() {
