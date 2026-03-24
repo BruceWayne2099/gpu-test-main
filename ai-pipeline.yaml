@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-backend
+  template:
+    metadata:
+      labels:
+        app: ai-backend
+    spec:
+      nodeSelector:
+        accelerator: nvidia-t4 #强制这个pod去GPU，因为图片是要落在GPU的数据盘里。
+      containers:
+      - name: backend
+        image: ai-backend:v19
+        imagePullPolicy: IfNotPresent # 这样k3s会现在本地docker找，找到直接干活
+        ports:
+        - containerPort: 5000
+        - containerPort: 8000
+        volumeMounts:
+          - name: nfs-storage
+            mountPath: /app/data/knowledge # 知识库文档
+            subPath: knowledge
+          - name: nfs-storage
+            mountPath: /app/model_file # 语义向量模型路径
+            subPath: model_file
+          - name: nfs-storage
+            mountPath: /app/user-images # 用户上传的图片路径
+            subPath: user-images  
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+      volumes:
+      - name: nfs-storage
+        hostPath:
+          path: /mnt/shared_storage/ai-demo
+          type: Directory
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-backend-svc
+spec:
+  selector:
+    app: ai-backend
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5000
+  type: ClusterIP
