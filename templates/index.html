@@ -136,43 +136,58 @@
 
     // 发送消息核心逻辑
     async function send() {
-        const input = document.getElementById('user-input');
-        const prompt = input.value.trim();
-        if (!prompt && !currentImageName) return;
+    const input = document.getElementById('user-input');
+    const fileInput = document.getElementById('file-input');
+    const prompt = input.value.trim();
+    
+    if (!prompt && !currentImageName) return;
 
-        // 1. 用户消息上墙
-        const displayPrompt = currentImageName ? `[图片:${currentImageName}] ${prompt}` : prompt;
-        appendMessage('user', displayPrompt);
-        input.value = '';
+    // 1. UI 表现
+    const displayPrompt = currentImageName ? `[图片:${currentImageName}] ${prompt}` : prompt;
+    appendMessage('user', displayPrompt);
+    input.value = '';
 
-        // 2. 创建思考中气泡
-        const box = document.getElementById('chat-box');
-        const aiMsg = document.createElement('div');
-        aiMsg.className = "flex justify-start italic text-slate-400 blinking";
-        aiMsg.innerHTML = `<div class="bg-slate-50 p-3 rounded-lg border border-dashed border-slate-300">AIOps 大脑正在思考中...</div>`;
-        box.appendChild(aiMsg);
-        box.scrollTop = box.scrollHeight;
+    // 2. 思考中...
+    const box = document.getElementById('chat-box');
+    const aiMsg = document.createElement('div');
+    aiMsg.className = "flex justify-start italic text-slate-400 blinking";
+    aiMsg.innerHTML = `<div class="bg-slate-50 p-3 rounded-lg border border-dashed border-slate-300">AIOps 大脑正在思考中...</div>`;
+    box.appendChild(aiMsg);
+    box.scrollTop = box.scrollHeight;
 
-        try {
-            // 3. 请求后端接口 (带上图片参数)
-            const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(currentImageName)}`;
-            const res = await fetch(url);
-            const data = await res.json();
-
-            // 4. 移除“思考中”，渲染正式回复
-            box.removeChild(aiMsg);
-            appendMessage('ai', data.response);
+    try {
+        let finalImageName = "";
+        
+        // 3. 【核心修正】如果有图片，必须先执行上传动作
+        if (fileInput.files.length > 0) {
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
             
-            // 5. 更新状态灯
-            updateStatusLights(data.response);
-            
-            // 发送完后清除预览图
-            clearImage();
-        } catch (e) {
-            aiMsg.innerHTML = `<div class="bg-red-50 text-red-600 p-3 rounded border border-red-300">❌ 连接后端异常或超时。</div>`;
-            aiMsg.classList.remove('blinking', 'text-slate-400');
+            const uploadRes = await fetch('/upload', { method: 'POST', body: formData });
+            const uploadData = await uploadRes.json();
+            if (uploadData.status === 'success') {
+                finalImageName = uploadData.filename;
+                console.log("图片上传成功:", finalImageName);
+            } else {
+                throw new Error("图片上传失败");
+            }
         }
+
+        // 4. 调用分析接口
+        const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(finalImageName)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        box.removeChild(aiMsg);
+        appendMessage('ai', data.response);
+        updateStatusLights(data.response);
+        clearImage();
+
+    } catch (e) {
+        aiMsg.innerHTML = `<div class="bg-red-50 text-red-600 p-3 rounded border border-red-300">❌ 故障: ${e.message}</div>`;
+        aiMsg.classList.remove('blinking');
     }
+}
 
     // 搜索逻辑
     async function searchHistory() {

@@ -34,6 +34,13 @@ embed_model = SentenceTransformer('/app/model_file/')
 vector_index = None
 all_chunks = []
 
+def save_history(p, r, m):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT INTO history (prompt, response, model, time) VALUES (?, ?, ?, ?)",
+                        (p, r, m, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    except: pass
+
 def get_safe_path(filename):
     """
     处理文件名：防止中文导致空字符串，防止路径穿越
@@ -45,41 +52,24 @@ def get_safe_path(filename):
     new_name = f"{int(time.time())}_{uuid.uuid4().hex[:6]}{ext}"
     return os.path.join(IMAGE_DIR, new_name)
 
-
 @app.route('/upload', methods=['POST'])
 def upload_file():
     try:
         if 'file' not in request.files:
             return jsonify({"error": "No file part"}), 400
-        
         file = request.files['file']
-        user_query = request.form.get("query", "请描述这张图片")
-
         if file.filename == '':
             return jsonify({"error": "No selected file"}), 400
 
-        # 1. 保存文件
-        target_path = get_safe_path(file.filename)
+        # 直接使用原名保存，确保前端 GET 请求能对上
+        filename = file.filename
+        target_path = os.path.join(IMAGE_DIR, filename)
         file.save(target_path)
-        print(f">>> [SRE Log] 文件已落地: {target_path}")
-
-        # 2. 调用 GPU 侧的 Ollama (Qwen2-VL/Llava)
-        # 注意：这里需要根据你 ollama-gpu 的 API 格式来传参
-        print(f">>> [SRE Log] 正在请求 GPU 节点进行图像分析...")
         
-        # 简化版逻辑：这里假设你使用的是 ollama 的 images 接口
-        # 实际代码中你可能需要将图片转成 base64 传给 ollama-gpu
-        # 这里仅展示路径流转逻辑
-        
-        return jsonify({
-            "status": "success",
-            "file_path": target_path,
-            "message": "图片上传成功，正在调取 GPU 识别...",
-            "debug_info": f"Image saved at {target_path}"
-        })
-
+        print(f">>> [SRE Log] 文件已落地 NFS: {target_path}")
+        return jsonify({"status": "success", "filename": filename})
     except Exception as e:
-        print(f">>> [SRE Error] 发生故障: {str(e)}")
+        print(f">>> [SRE Error] 上传失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/chat', methods=['POST'])
@@ -132,39 +122,32 @@ def get_semantic_context(user_query, top_n=3):
 def aigpt_api():
     raw_prompt = request.args.get('prompt', '')
     user_prompt = urllib.parse.unquote(raw_prompt)
-    image_name = request.args.get('image', '') 
-
-    if not user_prompt and not image_name:
-        return jsonify({"response": "提问内容不能为空"})
+    image_name = request.args.get('image', '')
 
     final_response = ""
     used_model = ""
-    
+
     # --- 场景 1：图片识图逻辑 (GPU) ---
     if image_name:
         used_model = VISION_MODEL
-        target_api = OLLAMA_GPU_API
         img_path = os.path.join(IMAGE_DIR, image_name)
+        print(f">>> [SRE Log] 正在检索路径: {img_path}")
         
         if not os.path.exists(img_path):
-            return jsonify({"response": f"错误：未在 {IMAGE_DIR} 找到图片 {image_name}"})
+            return jsonify({"response": f"❌ 错误：后端未找到图片 {image_name}，请重新上传。"})
 
         try:
             with open(img_path, "rb") as f:
                 img_base64 = base64.b64encode(f.read()).decode('utf-8')
             
-            print(f">>> [SRE Log] 发起 GPU 识图请求，模型: {used_model}")
-            r = requests.post(target_api, json={
-                "model": used_model,
+            r = requests.post(OLLAMA_GPU_API, json={
+                "model": VISION_MODEL,
                 "prompt": f"请作为 SRE 专家识别此图并回答：{user_prompt}",
                 "images": [img_base64],
                 "stream": False
-            }, timeout=(5, 300))
+            }, timeout=120)
             
-            if r.status_code == 200:
-                final_response = r.json().get('response', '')
-            else:
-                return jsonify({"response": f"GPU 后端报错: {r.status_code}"}), 500
+            final_response = r.json().get('response', '') # 赋值给统一变量
         except Exception as e:
             return jsonify({"response": f"识图链路故障: {e}"}), 500
 
@@ -181,7 +164,6 @@ def aigpt_api():
         target_api = OLLAMA_CPU_API
         for model in [PRIMARY_MODEL, BACKUP_MODEL]:
             try:
-                print(f"[DEBUG] 尝试调用 CPU 模型: {model}")
                 r = requests.post(target_api, json={
                     "model": model,
                     "prompt": final_prompt,
@@ -192,7 +174,6 @@ def aigpt_api():
                     final_response = r.json().get('response', '')
                     break
             except Exception as e:
-                print(f"[DEBUG] CPU 模型 {model} 异常: {e}")
                 continue
 
     # --- 统一持久化结果 ---
@@ -206,6 +187,9 @@ def aigpt_api():
                         (user_prompt if not image_name else f"[图片:{image_name}] {user_prompt}", 
                          final_response, used_model, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     except: pass
+
+    display_prompt = f"[图片:{image_name}] {user_prompt}" if image_name else user_prompt
+    save_history(display_prompt, final_response, used_model)
 
     tag = "🚀 [GPU识图]" if image_name else f"🔥 [70B+RAG]" if used_model == PRIMARY_MODEL else "💡 [Qwen]"
     return jsonify({"response": f"{tag}\n\n{final_response}"})
@@ -221,6 +205,8 @@ def search():
         cursor = conn.execute("SELECT prompt, response, time FROM history WHERE prompt LIKE ? OR response LIKE ? ORDER BY id DESC", (f'%{query}%', f'%{query}%'))
         results = [{"prompt": r[0], "response": r[1], "time": r[2]} for r in cursor.fetchall()]
     return jsonify(results)
+
+
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
