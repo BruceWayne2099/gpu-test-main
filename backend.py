@@ -25,7 +25,7 @@ IMAGE_DIR = "/app/user-images/"
 MODEL_CACHE_PATH = "/app/model_file/"
 
 # 建议将阈值放宽到 1.3，增加 RAG 命中率
-RAG_THRESHOLD = 1.3
+RAG_THRESHOLD = 1.8
 
 # --- 1. 向量引擎初始化 ---
 print(">>> [SRE] 正在加载 SentenceTransformer 模型...")
@@ -52,9 +52,10 @@ def build_vector_index():
                 with open(os.path.join(KNOWLEDGE_DIR, filename), 'r', encoding='utf-8') as f:
                     content = f.read()
                     # 简单的滑动窗口切片
-                    step = 300
+                    step = 250
+                    window_size = 400 # 增加窗口大小，包含更多上下文
                     for i in range(0, len(content), step):
-                        chunk_text = content[i : i + 350].strip()
+                        chunk_text = content[i : i + window_size].strip()
                         if chunk_text:
                             local_chunks.append({"filename": filename, "text": chunk_text})
             except Exception as e:
@@ -81,6 +82,8 @@ def get_semantic_context_with_score(query_text, top_n=2):
     query_vec = embed_model.encode([query_text])
     distances, indices = vector_index.search(np.array(query_vec).astype('float32'), top_n)
     min_dist = distances[0][0] if len(distances[0]) > 0 else 999.0
+
+    print(f">>> [RAG Debug] Query: {query_text} | Min Dist: {min_dist}")
     
     if min_dist > RAG_THRESHOLD:
         return "", min_dist
