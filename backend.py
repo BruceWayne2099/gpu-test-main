@@ -1,5 +1,5 @@
 import os
-import re
+import json
 import uuid
 import time
 import datetime
@@ -9,7 +9,7 @@ import numpy as np
 import requests
 import faiss
 import base64
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from sentence_transformers import SentenceTransformer
 
 app = Flask(__name__)
@@ -118,7 +118,7 @@ def upload_file():
     file = request.files['file']
     if not os.path.exists(IMAGE_DIR): os.makedirs(IMAGE_DIR)
     target_path = os.path.join(IMAGE_DIR, file.filename)
-    file.save(target_path)
+    file.save(target_path)  # 这里直接同名覆盖
     return jsonify({"status": "success", "filename": file.filename})
 
 @app.route('/aigpt_api')
@@ -137,7 +137,7 @@ def aigpt_api():
             with open(img_path, "rb") as f:
                 img_b64 = base64.b64encode(f.read()).decode('utf-8')
             
-            # 先利用 GPU 快速提取图片关键词，用于知识库检索
+            # 这里的视觉关键词提取暂时用非流式，保证检索速度
             try:
                 v_res = requests.post(OLLAMA_GPU_API, json={
                     "model": VISION_MODEL, 
@@ -147,35 +147,55 @@ def aigpt_api():
                 visual_keyword = v_res.json().get('response', '').strip()
             except: pass
 
-    # --- 阶段 2: 语义检索 ---
-    # 如果有视觉关键词，优先用关键词搜知识库，否则用用户问题搜
+    # --- 阶段 2: 语义检索 (RAG) ---
     search_query = visual_keyword if visual_keyword else user_prompt
     knowledge_context, dist_score = get_semantic_context_with_score(search_query)
 
-    # --- 阶段 3: Prompt 组装 ---
+    # --- 阶段 3: Prompt 组装 (这一步之前你漏掉了) ---
     system_prompt = "你是一位资深 SRE 专家，请基于专业知识回答问题。"
     if knowledge_context:
-        prompt_content = f"{system_prompt}\n\n【参考手册内容】:\n{knowledge_context}\n\n【用户问题】: {user_prompt}\n请结合手册内容给出详细排查建议。"
+        prompt_content = f"{system_prompt}\n\n【参考手册】:\n{knowledge_context}\n\n【用户问题】: {user_prompt}"
     else:
         prompt_content = f"{system_prompt}\n\n【用户问题】: {user_prompt}"
 
-    # --- 阶段 4: 统一请求 GPU 模型 ---
-    try:
+    # --- 阶段 4: 构建流式生成器 ---
+    def generate():
         payload = {
             "model": VISION_MODEL,
             "prompt": prompt_content,
-            "stream": False
+            "stream": True 
         }
         if img_b64:
             payload["images"] = [img_b64]
-            
-        r = requests.post(OLLAMA_GPU_API, json=payload, timeout=60)
-        final_ans = r.json().get('response', 'GPU 响应超时')
-    except Exception as e:
-        final_ans = f"GPU 链路异常: {str(e)}"
 
-    save_history(user_prompt, final_ans, VISION_MODEL)
-    return jsonify({"response": final_ans, "debug_dist": float(dist_score)})
+        # 记录完整回复以便后续存入数据库
+        full_response = []
+
+        try:
+            # timeout=300 确保给足思考时间
+            with requests.post(OLLAMA_GPU_API, json=payload, timeout=300, stream=True) as r:
+                for line in r.iter_lines():
+                    if line:
+                        chunk = line.decode('utf-8')
+                        # 尝试捕获文本部分存入 history
+                        try:
+                            import json
+                            chunk_data = json.loads(chunk)
+                            if 'response' in chunk_data:
+                                full_response.append(chunk_data['response'])
+                        except: pass
+                        
+                        yield f"data: {chunk}\n\n"
+            
+            # 生成结束后，异步或静默存入数据库
+            final_txt = "".join(full_response)
+            if final_txt:
+                save_history(user_prompt, final_txt, VISION_MODEL)
+
+        except Exception as e:
+            yield f"data: {{\"error\": \"GPU 链路超时或中断: {str(e)}\"}}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 # --- 4. 热刷新接口 (修复 404 问题) ---
 @app.route('/refresh_knowledge', methods=['POST'])
