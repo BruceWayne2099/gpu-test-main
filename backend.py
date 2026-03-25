@@ -99,7 +99,7 @@ def get_semantic_context_with_score(query_text, top_n=2):
     print(f">>> [RAG Debug] Query: {query_text} | Similarity Score: {max_score:.4f}", flush=True)
     
     # 余弦相似度通常 0.7 以上就算很准了，我们将阈值设为 0.6
-    SIM_THRESHOLD = 0.6 
+    SIM_THRESHOLD = 0.82 
     
     if max_score < SIM_THRESHOLD:
         return "", max_score
@@ -174,8 +174,11 @@ def aigpt_api():
 
     # --- 阶段 3: 强化型 Prompt 组装 ---
     # 这里加了“死命令”，强制模型必须看参考资料，尤其是针对 yaoming.txt
-    system_prompt = "你是一位资深 SRE 专家助手。请严格根据提供的【参考手册】回答问题，不要使用外部过时信息。"
-    
+    system_prompt = """你是一位资深 SRE 专家助手。
+        1. 如果【参考手册】内容与用户问题高度相关，请优先基于手册回答。
+        2. 如果【参考手册】是手册里的无关信息，请忽略手册，直接根据你的通用知识回答。
+        """
+
     if knowledge_context:
         prompt_content = f"""{system_prompt}
 
