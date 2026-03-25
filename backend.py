@@ -243,6 +243,15 @@ def refresh_knowledge():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/search')
+def search():
+    query = request.args.get('q', '')
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("SELECT prompt, response, time FROM history WHERE prompt LIKE ? OR response LIKE ? ORDER BY id DESC",
+                            (f'%{query}%', f'%{query}%'))
+        results = [{"prompt": r[0], "response": r[1], "time": r[2]} for r in cursor.fetchall()]
+    return jsonify(results)
+
 if __name__ == '__main__':
     init_db()
     app.run(host='0.0.0.0', port=5000, debug=False)
