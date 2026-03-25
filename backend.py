@@ -10,7 +10,7 @@ import requests
 import faiss
 import base64
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 app = Flask(__name__)
 
@@ -28,13 +28,18 @@ MODEL_CACHE_PATH = "/app/model_file/"
 RAG_THRESHOLD = 1.8
 
 # --- 1. 向量引擎初始化 ---
-print(">>> [SRE] 正在加载 SentenceTransformer 模型...")
+print(">>> [SRE] 正在加载 SentenceTransformer 模型 & Reranker 精排模型...")
 try:
     # 优先从本地 PVC 加载模型
     embed_model = SentenceTransformer(MODEL_CACHE_PATH)
 except Exception as e:
     print(f">>> [Critical] 本地加载失败，尝试在线模式: {e}")
     embed_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+
+try:
+    rerank_model = CrossEncoder('BAAI/bge-reranker-v2-m3', max_length=512)
+except Exception as e:
+    print(f">>> [Error] Reranker 加载失败: {e}")
 
 vector_index = None
 all_chunks = []
@@ -98,8 +103,8 @@ def get_semantic_context_with_score(query_text, top_n=2):
     # 打印到日志里，看看这次是不是 0.x 了
     print(f">>> [RAG Debug] Query: {query_text} | Similarity Score: {max_score:.4f}", flush=True)
     
-    # 余弦相似度通常 0.7 以上就算很准了，我们将阈值设为 0.6
-    SIM_THRESHOLD = 0.82 
+    # 余弦相似度通常 0.7 以上就算很准了
+    SIM_THRESHOLD = 0.80
     
     if max_score < SIM_THRESHOLD:
         return "", max_score
@@ -124,6 +129,64 @@ def save_history(p, r, m):
             conn.execute("INSERT INTO history (prompt, response, model, time) VALUES (?, ?, ?, ?)",
                         (p, r, m, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     except: pass
+
+def get_semantic_context_with_rerank(query_text, top_n_coarse=10, top_n_fine=2):
+    """
+    两阶段检索：海选 + 精排
+    """
+    if vector_index is None or not query_text:
+        return "", 0.0
+    
+    # 1. 第一阶段：海选 (向量搜索)
+    query_vec = embed_model.encode([query_text]).astype('float32')
+    faiss.normalize_L2(query_vec)
+    
+    # 扩大搜索范围，捞出 10 个备选
+    coarse_scores, indices = vector_index.search(query_vec, top_n_coarse)
+    
+    candidate_chunks = []
+    for idx in indices[0]:
+        if idx != -1 and idx < len(all_chunks):
+            candidate_chunks.append(all_chunks[idx])
+
+    if not candidate_chunks:
+        return "", 0.0
+
+    # 2. 第二阶段：精排 (Reranker)
+    # 将问题和每一个候选切片配对：[[Q, D1], [Q, D2]...]
+    pairs = [[query_text, c['text']] for c in candidate_chunks]
+    
+    # Reranker 直接给出相关度分数 (数值越高越相关)
+    rerank_scores = rerank_model.predict(pairs)
+    
+    # 将分数与切片重新组合并排序
+    combined = []
+    for i in range(len(candidate_chunks)):
+        combined.append({
+            "chunk": candidate_chunks[i],
+            "score": float(rerank_scores[i])
+        })
+    
+    # 按精排分数从高到低排序
+    combined.sort(key=lambda x: x['score'], reverse=True)
+    
+    # 3. 结果过滤
+    # BGE-Reranker 的分数通常需要一个阈值，比如 > -2.0 (视模型而定)
+    # 我们取精排后的前 N 个
+    best_score = combined[0]['score']
+    print(f">>> [Rerank Debug] Query: {query_text} | Top Rerank Score: {best_score:.4f}", flush=True)
+
+    # 设定精排阈值，防止“简历污染”
+    RERANK_THRESHOLD = -1.0 # 这是一个经验值，可以根据测试调整
+    if best_score < RERANK_THRESHOLD:
+        return "", best_score
+
+    retrieved_parts = []
+    for item in combined[:top_n_fine]:
+        c = item['chunk']
+        retrieved_parts.append(f"【参考来源: {c['filename']}】\n{c['text']}")
+        
+    return "\n\n".join(retrieved_parts), best_score
 
 # --- 3. 路由定义 ---
 
@@ -170,10 +233,10 @@ def aigpt_api():
     # --- 阶段 2: 语义检索 (RAG) ---
     # 如果有视觉关键词，优先用关键词检索，否则用用户原话
     search_query = visual_keyword if visual_keyword else user_prompt
-    knowledge_context, dist_score = get_semantic_context_with_score(search_query)
+    knowledge_context, dist_score = get_semantic_context_with_rerank(search_query) # 这里用到rerank
 
     # --- 阶段 3: 强化型 Prompt 组装 ---
-    # 这里加了“死命令”，强制模型必须看参考资料，尤其是针对 yaoming.txt
+    # 这里加了“死命令”，强制模型必须先看参考资料
     system_prompt = """你是一位资深 SRE 专家助手。
         1. 如果【参考手册】内容与用户问题高度相关，请优先基于手册回答。
         2. 如果【参考手册】是手册里的无关信息，请忽略手册，直接根据你的通用知识回答。
