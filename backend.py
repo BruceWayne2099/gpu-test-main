@@ -63,12 +63,19 @@ def build_vector_index():
 
     if local_chunks:
         texts = [c['text'] for c in local_chunks]
-        embeddings = embed_model.encode(texts)
-        index = faiss.IndexFlatL2(embeddings.shape[1])
-        index.add(np.array(embeddings).astype('float32'))
+        embeddings = embed_model.encode(texts).astype('float32')
+        
+        # --- 核心改进：向量归一化 ---
+        faiss.normalize_L2(embeddings) 
+        
+        # 使用 IndexFlatIP (内积索引)，在归一化后它等同于余弦相似度
+        # 余弦相似度范围是 0 到 1，越接近 1 越相似
+        index = faiss.IndexFlatIP(embeddings.shape[1])
+        index.add(embeddings)
+        
         vector_index = index
         all_chunks = local_chunks
-        print(f">>> [Success] 知识库已刷新，共 {len(all_chunks)} 个切片。")
+        print(f">>> [Success] 知识库已刷新，维度: {embeddings.shape[1]}，切片: {len(all_chunks)}")
     return len(local_chunks)
 
 # 启动时执行一次初始化
@@ -77,23 +84,32 @@ build_vector_index()
 def get_semantic_context_with_score(query_text, top_n=2):
     """检索最相关的上下文并返回 Dist 分数"""
     if vector_index is None or not query_text:
-        return "", 999.0
+        return "", 0.0 # 初始分改为 0
     
-    query_vec = embed_model.encode([query_text])
-    distances, indices = vector_index.search(np.array(query_vec).astype('float32'), top_n)
-    min_dist = distances[0][0] if len(distances[0]) > 0 else 999.0
-
-    print(f">>> [RAG Debug] Query: {query_text} | Min Dist: {min_dist}")
+    query_vec = embed_model.encode([query_text]).astype('float32')
     
-    if min_dist > RAG_THRESHOLD:
-        return "", min_dist
+    # --- 核心改进：查询向量也必须归一化 ---
+    faiss.normalize_L2(query_vec)
+    
+    # search 返回的是相似度分数 (Scores)
+    scores, indices = vector_index.search(query_vec, top_n)
+    max_score = float(scores[0][0])
+    
+    # 打印到日志里，看看这次是不是 0.x 了
+    print(f">>> [RAG Debug] Query: {query_text} | Similarity Score: {max_score:.4f}", flush=True)
+    
+    # 余弦相似度通常 0.7 以上就算很准了，我们将阈值设为 0.6
+    SIM_THRESHOLD = 0.6 
+    
+    if max_score < SIM_THRESHOLD:
+        return "", max_score
 
     retrieved_parts = []
     for idx in indices[0]:
         if idx != -1 and idx < len(all_chunks):
             chunk = all_chunks[idx]
             retrieved_parts.append(f"【参考来源: {chunk['filename']}】\n{chunk['text']}")
-    return "\n\n".join(retrieved_parts), min_dist
+    return "\n\n".join(retrieved_parts), max_score
 
 # --- 2. 数据库逻辑 ---
 def init_db():
