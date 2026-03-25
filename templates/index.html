@@ -154,113 +154,118 @@
     }
 
     // --- 3. 核心流式发送逻辑 ---
-    async function send() {
-        const input = document.getElementById('user-input');
-        const fileInput = document.getElementById('file-input');
-        const prompt = input.value.trim();
-        
-        if (!prompt && fileInput.files.length === 0) return;
+async function send() {
+    const input = document.getElementById('user-input');
+    const fileInput = document.getElementById('file-input');
+    const prompt = input.value.trim();
+    
+    if (!prompt && fileInput.files.length === 0) return;
 
-        // 用户端预显
-        const tempFileName = fileInput.files.length > 0 ? fileInput.files[0].name : "";
-        appendMessage('user', tempFileName ? `[图片上传中: ${tempFileName}]\n${prompt}` : prompt);
-        input.value = '';
-        input.style.height = '48px'; // 重置高度
+    // 1. 用户消息预显
+    const tempFileName = fileInput.files.length > 0 ? fileInput.files[0].name : "";
+    appendMessage('user', tempFileName ? `[图片上传: ${tempFileName}]\n${prompt}` : prompt);
+    input.value = '';
 
-        // 创建 AI 容器
-        const box = document.getElementById('chat-box');
-        const aiDiv = document.createElement('div');
-        aiDiv.className = "flex justify-start mb-4";
-        aiDiv.innerHTML = `
-            <div class="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm max-w-[85%] text-sm relative">
-                <div id="current-think" class="text-slate-400 italic mb-2 hidden border-l-2 border-slate-200 pl-3 py-1"></div>
-                <div id="current-answer" class="prose prose-sm prose-slate">正在调配 SRE 专家资源...</div>
-                <div id="current-debug" class="hidden mt-3 pt-2 border-t border-dashed border-slate-100 flex justify-end"></div>
-            </div>`;
-        box.appendChild(aiDiv);
-        box.scrollTop = box.scrollHeight;
+    // 2. 创建 AI 容器
+    const box = document.getElementById('chat-box');
+    const aiDiv = document.createElement('div');
+    aiDiv.className = "flex justify-start mb-4";
+    aiDiv.innerHTML = `
+        <div class="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm max-w-[85%] text-sm relative">
+            <div id="current-think" class="text-slate-400 italic mb-2 hidden border-l-2 border-slate-200 pl-3 py-1"></div>
+            <div id="current-answer" class="prose prose-sm prose-slate text-slate-500">正在链接 SRE 知识库...</div>
+            <div id="current-debug" class="hidden mt-3 pt-2 border-t border-dashed border-slate-100 flex justify-end"></div>
+        </div>`;
+    box.appendChild(aiDiv);
+    
+    const thinkArea = aiDiv.querySelector('#current-think');
+    const answerArea = aiDiv.querySelector('#current-answer');
+    const debugArea = aiDiv.querySelector('#current-debug');
 
-        const thinkArea = aiDiv.querySelector('#current-think');
-        const answerArea = aiDiv.querySelector('#current-answer');
-        const debugArea = aiDiv.querySelector('#current-debug');
-
-        try {
-            // A. 处理图片
-            let serverFileName = "";
-            if (fileInput.files.length > 0) {
-                const formData = new FormData();
-                formData.append('file', fileInput.files[0]);
-                const upRes = await fetch('/upload', { method: 'POST', body: formData });
-                const upData = await upRes.json();
-                serverFileName = upData.filename;
-            }
-
-            // B. 流式传输
-            const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(serverFileName)}`;
-            const response = await fetch(url);
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-
-            let fullContent = "";
-            answerArea.innerText = ""; // 清空等待状态
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
-                
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.replace('data: ', ''));
-                            
-                            // 1. 处理 Dist 分数 (Debug)
-                            if (data.debug_dist !== undefined) {
-                                debugArea.classList.remove('hidden');
-                                let status = data.debug_dist < 1.3 ? "🎯 知识命中" : "🌐 通用知识";
-                                let color = data.debug_dist < 1.3 ? "#2ecc71" : "#f1c40f";
-                                debugArea.innerHTML = `
-                                    <div class="text-[10px] font-mono flex items-center space-x-2">
-                                        <span style="color: ${color}; font-weight: bold;">${status}</span>
-                                        <span class="text-slate-300">|</span>
-                                        <span class="text-slate-400">Similarity: ${data.debug_dist.toFixed(4)}</span>
-                                    </div>`;
-                            }
-
-                            // 2. 处理文字流
-                            if (data.response) {
-                                fullContent += data.response;
-                                
-                                // 处理 <think> 标签逻辑
-                                if (fullContent.includes('<think>') && !fullContent.includes('</think>')) {
-                                    thinkArea.classList.remove('hidden');
-                                    let thinkText = fullContent.split('<think>')[1];
-                                    thinkArea.innerText = "🤔 思考中: " + (thinkText || "...");
-                                } else if (fullContent.includes('</think>')) {
-                                    let parts = fullContent.split('</think>');
-                                    thinkArea.innerText = "💡 思考路径: " + parts[0].replace('<think>', '').trim();
-                                    thinkArea.classList.replace('text-slate-400', 'text-slate-300');
-                                    answerArea.innerHTML = marked.parse(parts[1] || "");
-                                } else {
-                                    answerArea.innerHTML = marked.parse(fullContent);
-                                }
-                            }
-                        } catch (e) {}
-                    }
-                }
-                box.scrollTop = box.scrollHeight;
-            }
-            
-            // 发送完成：亮起 GPU 灯
-            document.getElementById('status-gpu').classList.add('bg-green-500', 'blinking');
-            clearImage();
-
-        } catch (e) {
-            answerArea.innerHTML = `<span class="text-red-500 font-bold">❌ 系统故障: ${e.message}</span>`;
+    try {
+        // A. 图片上传逻辑
+        let serverFileName = "";
+        if (fileInput.files.length > 0) {
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            const upRes = await fetch('/upload', { method: 'POST', body: formData });
+            const upData = await upRes.json();
+            serverFileName = upData.filename;
         }
+
+        // B. 流式传输
+        const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(serverFileName)}`;
+        const response = await fetch(url);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        let fullContent = "";
+        let hasFixedAnswer = false;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const jsonStr = line.replace('data: ', '').trim();
+                    if (!jsonStr) continue;
+
+                    try {
+                        const data = JSON.parse(jsonStr);
+                        
+                        // --- 核心改动：解析后端发来的第一个 Dist 包 ---
+                        if (data.debug_dist !== undefined) {
+                            debugArea.classList.remove('hidden');
+                            // 阈值判断：1.3 以内算命中
+                            let isHit = data.debug_dist < 1.3;
+                            let status = isHit ? "🎯 知识命中" : "🌐 通用知识";
+                            let color = isHit ? "#10b981" : "#f59e0b";
+                            debugArea.innerHTML = `
+                                <div class="text-[10px] font-mono flex items-center space-x-2">
+                                    <span style="color: ${color}; font-weight: bold;">${status}</span>
+                                    <span class="text-slate-300">|</span>
+                                    <span class="text-slate-400">Dist: ${data.debug_dist.toFixed(4)}</span>
+                                </div>`;
+                            continue; // 处理完 Dist 包，跳过后续逻辑
+                        }
+
+                        // --- 解析 Ollama 正常的文字包 ---
+                        if (data.response) {
+                            if (!hasFixedAnswer) {
+                                answerArea.innerText = ""; // 收到第一个字时，清空“正在链接...”提示
+                                answerArea.classList.remove('text-slate-500');
+                                hasFixedAnswer = true;
+                            }
+
+                            fullContent += data.response;
+                            
+                            // 处理思考逻辑 <think>
+                            if (fullContent.includes('<think>') && !fullContent.includes('</think>')) {
+                                thinkArea.classList.remove('hidden');
+                                thinkArea.innerText = "🤔 推理中: " + fullContent.split('<think>')[1];
+                            } else if (fullContent.includes('</think>')) {
+                                let parts = fullContent.split('</think>');
+                                thinkArea.innerText = "💡 诊断路径: " + parts[0].replace('<think>', '').trim();
+                                answerArea.innerHTML = marked.parse(parts[1].trim());
+                            } else {
+                                answerArea.innerHTML = marked.parse(fullContent);
+                            }
+                        }
+                    } catch (e) { console.log("JSON 解析跳过:", e); }
+                }
+            }
+            box.scrollTop = box.scrollHeight;
+        }
+        clearImage();
+
+    } catch (e) {
+        answerArea.innerHTML = `<span class="text-red-500">❌ 调度失败: ${e.message}</span>`;
     }
+}
 
     // --- 4. 检索逻辑 ---
     async function searchHistory() {

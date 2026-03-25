@@ -130,36 +130,51 @@ def aigpt_api():
     visual_keyword = ""
     img_b64 = None
 
-    # --- 阶段 1: 视觉解析 (如果上传了图) ---
+    # --- 阶段 1: 视觉解析 (如果上传了图片) ---
     if image_name:
         img_path = os.path.join(IMAGE_DIR, image_name)
         if os.path.exists(img_path):
             with open(img_path, "rb") as f:
                 img_b64 = base64.b64encode(f.read()).decode('utf-8')
             
-            # 这里的视觉关键词提取暂时用非流式，保证检索速度
             try:
+                # 使用非流式请求快速获取图片关键词，用于辅助 RAG 检索
                 v_res = requests.post(OLLAMA_GPU_API, json={
                     "model": VISION_MODEL, 
                     "prompt": "Describe this image in 5 keywords, separated by commas.",
                     "images": [img_b64], "stream": False
                 }, timeout=15)
                 visual_keyword = v_res.json().get('response', '').strip()
-            except: pass
+            except Exception as e:
+                print(f">>> [Vision Error]: {e}")
 
     # --- 阶段 2: 语义检索 (RAG) ---
+    # 如果有视觉关键词，优先用关键词检索，否则用用户原话
     search_query = visual_keyword if visual_keyword else user_prompt
     knowledge_context, dist_score = get_semantic_context_with_score(search_query)
 
-    # --- 阶段 3: Prompt 组装 (这一步之前你漏掉了) ---
-    system_prompt = "你是一位资深 SRE 专家，请基于专业知识回答问题。"
+    # --- 阶段 3: 强化型 Prompt 组装 ---
+    # 这里加了“死命令”，强制模型必须看参考资料，尤其是针对 yaoming.txt
+    system_prompt = "你是一位资深 SRE 专家助手。请严格根据提供的【参考手册】回答问题，不要使用外部过时信息。"
+    
     if knowledge_context:
-        prompt_content = f"{system_prompt}\n\n【参考手册】:\n{knowledge_context}\n\n【用户问题】: {user_prompt}"
+        prompt_content = f"""{system_prompt}
+
+【参考手册内容（高优先级）】:
+{knowledge_context}
+
+【用户提问】: {user_prompt}
+
+请结合手册给出诊断建议（如果是关于姚明或学习的，请务必引用手册中的核心语录）："""
     else:
-        prompt_content = f"{system_prompt}\n\n【用户问题】: {user_prompt}"
+        prompt_content = f"{system_prompt}\n\n【用户提问】: {user_prompt}"
 
     # --- 阶段 4: 构建流式生成器 ---
     def generate():
+        # 重要：先发一个包含距离分数的数据包，让前端显示 Dist 标签
+        dist_packet = {"debug_dist": float(dist_score)}
+        yield f"data: {json.dumps(dist_packet)}\n\n"
+
         payload = {
             "model": VISION_MODEL,
             "prompt": prompt_content,
@@ -168,32 +183,31 @@ def aigpt_api():
         if img_b64:
             payload["images"] = [img_b64]
 
-        # 记录完整回复以便后续存入数据库
-        full_response = []
-
+        full_response_text = ""
         try:
-            # timeout=300 确保给足思考时间
+            # stream=True 开启流式读取 Ollama 响应
             with requests.post(OLLAMA_GPU_API, json=payload, timeout=300, stream=True) as r:
                 for line in r.iter_lines():
                     if line:
-                        chunk = line.decode('utf-8')
-                        # 尝试捕获文本部分存入 history
+                        chunk_str = line.decode('utf-8')
+                        
+                        # 尝试提取文本内容用于保存历史
                         try:
-                            import json
-                            chunk_data = json.loads(chunk)
-                            if 'response' in chunk_data:
-                                full_response.append(chunk_data['response'])
+                            chunk_json = json.loads(chunk_str)
+                            if 'response' in chunk_json:
+                                full_response_text += chunk_json['response']
                         except: pass
                         
-                        yield f"data: {chunk}\n\n"
+                        # 将 Ollama 的原始 chunk 实时转发给前端
+                        yield f"data: {chunk_str}\n\n"
             
-            # 生成结束后，异步或静默存入数据库
-            final_txt = "".join(full_response)
-            if final_txt:
-                save_history(user_prompt, final_txt, VISION_MODEL)
+            # 生成结束，保存对话到 SQLite
+            if full_response_text:
+                save_history(user_prompt, full_response_text, VISION_MODEL)
 
         except Exception as e:
-            yield f"data: {{\"error\": \"GPU 链路超时或中断: {str(e)}\"}}\n\n"
+            # 捕获链路超时等异常并通知前端
+            yield f"data: {{\"error\": \"GPU 推理链路异常: {str(e)}\"}}\n\n"
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
