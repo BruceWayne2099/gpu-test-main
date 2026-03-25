@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SRE AIOps 智能终端 - 70B/Qwen </title>
+    <title>SRE AIOps 智能终端 - Qwen-VL/Llama3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
@@ -15,8 +15,9 @@
         @keyframes blink { 50% { opacity: 0.5; } }
         .blinking { animation: blink 1s linear infinite; }
         
-        /* 图片预览小窗 */
-        #image-preview-container { transition: all 0.3s ease; }
+        /* 代码块换行处理 */
+        pre { white-space: pre-wrap; word-wrap: break-word; background: #f8fafc; padding: 10px; border-radius: 4px; margin: 5px 0; border: 1px solid #e2e8f0; }
+        code { font-family: 'Fira Code', monospace; font-size: 0.85rem; }
     </style>
 </head>
 
@@ -24,48 +25,55 @@
 
 <header class="bg-slate-900 text-white p-3 shadow-xl flex items-center justify-between">
     <div class="flex items-center space-x-3">
-        <h1 class="font-mono text-xl tracking-wider text-green-400">AIOPS-CORE ChenShuo_VISION</h1>
+        <div class="w-3 h-3 bg-green-500 rounded-full blinking"></div>
+        <h1 class="font-mono text-xl tracking-wider text-green-400">AIOPS-CORE VISION_AGENT</h1>
     </div>
-    <div class="text-xs text-slate-400 font-mono text-right">
-        Host: K3s Cluster | PVC: 500GB Ready | Node: 32C/128G + T4 GPU
+    <div class="text-xs text-slate-400 font-mono text-right leading-tight">
+        Cluster: K3s Edge | Storage: 500GB PVC <br>
+        Compute: 32C/128G + NVIDIA T4 GPU
     </div>
 </header>
 
 <div class="flex-1 flex overflow-hidden">
-
-    <div class="flex-1 flex flex-col bg-slate-50 border-r border-slate-200">
+    <div class="flex-1 flex flex-col bg-slate-50 border-r border-slate-200 relative">
         <div id="chat-box" class="flex-1 overflow-y-auto p-6 space-y-4">
             <div class="flex justify-start">
                 <div class="bg-white p-3 rounded-lg shadow-sm border border-slate-200 max-w-[80%] text-sm">
-                    Welcome！**v18 视觉版**已就绪。有问题可以联系管理员
-                    <br><br>你可以直接输入问题，或者**点击左下角上传故障截图**。
+                    🚀 **SRE AIOps v18 视觉增强版** 已就绪。<br><br>
+                    你可以：<br>
+                    1. 直接描述 K8s 故障或性能问题。<br>
+                    2. 粘贴日志内容进行分析。<br>
+                    3. **点击左下角图标**上传监控面板或错误截图。
                 </div>
             </div>
         </div>
 
-        <div id="image-preview-container" class="hidden px-6 py-2 bg-slate-100 border-t border-slate-200 flex items-center space-x-3">
+        <div id="image-preview-container" class="hidden px-6 py-2 bg-white border-t border-slate-200 flex items-center space-x-3">
             <div class="relative">
                 <img id="image-preview" src="" class="h-20 w-auto rounded border-2 border-blue-500 shadow-md">
-                <button onclick="clearImage()" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center">×</button>
+                <button onclick="clearImage()" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center shadow-lg">×</button>
             </div>
-            <span id="image-name" class="text-xs text-slate-500 font-mono"></span>
+            <div class="flex flex-col">
+                <span id="image-name" class="text-xs text-slate-500 font-mono font-bold"></span>
+                <span class="text-[10px] text-slate-400">Ready for Vision Analysis</span>
+            </div>
         </div>
 
-        <div class="p-4 bg-white border-t border-slate-300">
+        <div class="p-4 bg-white border-t border-slate-300 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
             <div class="max-w-4xl mx-auto flex items-end space-x-2">
-                <button onclick="document.getElementById('file-input').click()" class="p-2 text-slate-500 hover:text-blue-600 transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <button onclick="document.getElementById('file-input').click()" class="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                 </button>
                 <input type="file" id="file-input" class="hidden" accept="image/*" onchange="previewImage(this)">
                 
-                <input id="user-input" type="text" 
-                       class="flex-1 border-2 border-slate-200 rounded-lg px-4 py-2 focus:border-blue-500 outline-none transition" 
+                <textarea id="user-input" 
+                       class="flex-1 border-2 border-slate-200 rounded-xl px-4 py-2 focus:border-blue-500 outline-none transition-all resize-none h-12 pt-3" 
                        placeholder="输入运维问题、K8S日志、架构需求..."
-                       onkeyup="if(event.keyCode==13) send()">
+                       onkeyup="if(event.keyCode==13 && !event.shiftKey) send()"></textarea>
                 
-                <button onclick="send()" class="bg-blue-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-blue-700 transition active:scale-95">
+                <button onclick="send()" class="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-blue-700 transition-all active:scale-95 shadow-md">
                     发送
                 </button>
             </div>
@@ -73,145 +81,58 @@
     </div>
 
     <aside class="w-80 flex flex-col p-4 bg-white border-l border-slate-300">
-        <div class="mb-6 p-4 border border-slate-200 rounded-lg bg-slate-50">
-            <h3 class="font-bold text-slate-700 mb-3 text-sm">📡 节点状态 (KeepAlive: -1)</h3>
-            <div class="space-y-2 text-sm font-mono">
+        <div class="mb-6 p-4 border border-slate-200 rounded-xl bg-slate-50 shadow-inner">
+            <h3 class="font-bold text-slate-700 mb-3 text-sm flex items-center">
+                <span class="mr-2">📡</span> 节点算力状态
+            </h3>
+            <div class="space-y-3 text-xs font-mono">
                 <div class="flex items-center justify-between">
-                    <span>Llama3-70B (CPU)</span>
-                    <div id="status-70b" class="w-3 h-3 rounded-full bg-green-500 blinking shadow-md"></div>
+                    <span class="text-slate-600">Ollama-RAG (CPU)</span>
+                    <div id="status-70b" class="w-3 h-3 rounded-full bg-green-500 shadow-sm"></div>
                 </div>
                 <div class="flex items-center justify-between">
-                    <span>Qwen2-VL (GPU)</span>
-                    <div id="status-gpu" class="w-3 h-3 rounded-full bg-slate-300"></div>
+                    <span class="text-slate-600">Qwen-Vision (GPU)</span>
+                    <div id="status-gpu" class="w-3 h-3 rounded-full bg-slate-300 transition-colors duration-500"></div>
                 </div>
             </div>
         </div>
 
         <div class="flex-1 flex flex-col">
-            <h3 class="font-bold text-slate-700 mb-3 text-sm">🔍 历史全文本检索 (SQLite)</h3>
-            <div class="flex space-x-1 mb-2">
-                <input id="search-input" type="text" class="flex-1 text-sm border border-slate-200 rounded px-2 py-1 focus:border-green-500 outline-none" placeholder="搜索关键词 (PVC, Error)...">
-                <button onclick="searchHistory()" class="bg-slate-700 text-white text-xs px-3 rounded hover:bg-black transition">搜索</button>
+            <h3 class="font-bold text-slate-700 mb-3 text-sm flex items-center">
+                <span class="mr-2">🔍</span> 知识库/历史检索
+            </h3>
+            <div class="flex space-x-1 mb-3">
+                <input id="search-input" type="text" class="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:border-green-500 outline-none" placeholder="PVC, CrashLoop...">
+                <button onclick="searchHistory()" class="bg-slate-800 text-white text-xs px-3 rounded-lg hover:bg-black transition">搜索</button>
             </div>
-            <div id="search-results" class="flex-1 overflow-y-auto space-y-2 text-xs"></div>
+            <div id="search-results" class="flex-1 overflow-y-auto space-y-2"></div>
         </div>
     </aside>
 </div>
 
 <script>
- // --- 全局配置 ---
-marked.setOptions({ sanitize: false, breaks: true }); // sanitize 改为 false 允许部分 HTML 渲染
-let currentImageName = "";
+    // --- 1. 初始化配置 ---
+    marked.setOptions({ sanitize: false, breaks: true });
+    let currentImageName = "";
 
-// --- 核心流式发送函数 ---
-async function send() {
-    const input = document.getElementById('user-input');
-    const fileInput = document.getElementById('file-input');
-    const prompt = input.value.trim();
-    
-    if (!prompt && fileInput.files.length === 0) return;
-
-    // 1. UI 预显：用户消息
-    const tempFileName = fileInput.files.length > 0 ? fileInput.files[0].name : "";
-    appendMessage('user', tempFileName ? `[图片:${tempFileName}] ${prompt}` : prompt);
-    input.value = '';
-
-    // 2. 创建一个空的 AI 回答容器，准备接收流
-    const box = document.getElementById('chat-box');
-    const aiDiv = document.createElement('div');
-    aiDiv.className = "flex justify-start mb-4";
-    // 初始状态：带有思考样式的容器
-    aiDiv.innerHTML = `
-        <div class="bg-white border border-slate-200 p-3 rounded-lg shadow-sm max-w-[80%] text-sm relative">
-            <div id="current-think" class="text-slate-400 italic mb-2 hidden" style="border-left: 2px solid #e2e8f0; padding-left: 8px;"></div>
-            <div id="current-answer"></div>
-            <div id="current-debug" class="hidden" style="font-size: 10px; color: #94a3b8; margin-top: 8px; border-top: 1px dashed #e2e8f0; pt-1; text-align: right;"></div>
-        </div>`;
-    box.appendChild(aiDiv);
-    
-    const thinkArea = aiDiv.querySelector('#current-think');
-    const answerArea = aiDiv.querySelector('#current-answer');
-    const debugArea = aiDiv.querySelector('#current-debug');
-
-    try {
-        // 3. 处理图片上传
-        let serverFileName = "";
-        if (fileInput.files.length > 0) {
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            const upRes = await fetch('/upload', { method: 'POST', body: formData });
-            const upData = await upRes.json();
-            serverFileName = upData.filename;
-        }
-
-        // 4. 发起流式请求
-        const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(serverFileName)}`;
-        const response = await fetch(url);
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        let fullContent = "";
-        let isThinking = false;
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-            
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.replace('data: ', ''));
-                        
-                        // 处理 Ollama 返回的 response 字段
-                        if (data.response) {
-                            const word = data.response;
-                            fullContent += word;
-
-                            // 推理过程样式处理：识别 <think> 标签
-                            if (fullContent.includes('<think>') && !fullContent.includes('</think>')) {
-                                isThinking = true;
-                                thinkArea.classList.remove('hidden');
-                                // 提取 <think> 之后的内容
-                                let thinkText = fullContent.split('<think>')[1] || "";
-                                thinkArea.innerHTML = `🤔 思考中: ${thinkText}`;
-                            } else if (fullContent.includes('</think>')) {
-                                isThinking = false;
-                                let parts = fullContent.split('</think>');
-                                thinkArea.innerHTML = `💡 思考完成: ${parts[0].replace('<think>', '')}`;
-                                thinkArea.classList.add('text-slate-300'); // 变淡
-                                answerArea.innerHTML = marked.parse(parts[1] || "");
-                            } else {
-                                // 普通文本输出
-                                answerArea.innerHTML = marked.parse(fullContent);
-                            }
-                        }
-                        
-                        // 如果后端传了 debug 信息（通常在最后或第一个 chunk）
-                        if (data.debug_dist) {
-                            debugArea.classList.remove('hidden');
-                            let status = data.debug_dist < 1.3 ? "🎯 知识命中" : "🌐 通用知识";
-                            debugArea.innerHTML = `<span class="text-green-500">${status}</span> | Dist: ${data.debug_dist.toFixed(4)}`;
-                        }
-                        
-                    } catch (e) { /* 忽略不完整的 JSON */ }
-                }
-            }
-            box.scrollTop = box.scrollHeight;
-        }
-
-        clearImage();
-        // 更新状态灯（现在统一给 GPU 灯）
-        document.getElementById('status-gpu').classList.add('bg-green-500', 'blinking');
-
-    } catch (e) {
-        answerArea.innerHTML = `<span class="text-red-500 italic">Pipeline Error: ${e.message}</span>`;
+    // --- 2. 基础 UI 函数 ---
+    function appendMessage(role, content) {
+        const box = document.getElementById('chat-box');
+        const div = document.createElement('div');
+        div.className = role === 'user' ? "flex justify-end mb-4" : "flex justify-start mb-4";
+        
+        const bgColor = role === 'user' ? "bg-blue-600 text-white shadow-md" : "bg-white border border-slate-200 shadow-sm";
+        
+        div.innerHTML = `
+            <div class="${bgColor} p-3 rounded-2xl max-w-[85%] text-sm">
+                ${role === 'user' ? content : marked.parse(content)}
+            </div>
+        `;
+        
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
     }
-}
 
-    // 图片预览逻辑
     function previewImage(input) {
         if (input.files && input.files[0]) {
             const file = input.files[0];
@@ -232,133 +153,150 @@ async function send() {
         document.getElementById('image-preview-container').classList.add('hidden');
     }
 
-    // 发送消息核心逻辑
+    // --- 3. 核心流式发送逻辑 ---
     async function send() {
-    const input = document.getElementById('user-input');
-    const fileInput = document.getElementById('file-input');
-    const prompt = input.value.trim();
-    
-    if (!prompt && fileInput.files.length === 0) return;
+        const input = document.getElementById('user-input');
+        const fileInput = document.getElementById('file-input');
+        const prompt = input.value.trim();
+        
+        if (!prompt && fileInput.files.length === 0) return;
 
-    // UI 预显
-    const tempFileName = fileInput.files.length > 0 ? fileInput.files[0].name : "";
-    appendMessage('user', tempFileName ? `[图片:${tempFileName}] ${prompt}` : prompt);
-    input.value = '';
+        // 用户端预显
+        const tempFileName = fileInput.files.length > 0 ? fileInput.files[0].name : "";
+        appendMessage('user', tempFileName ? `[图片上传中: ${tempFileName}]\n${prompt}` : prompt);
+        input.value = '';
+        input.style.height = '48px'; // 重置高度
 
-    // --- 状态提示 (改为手动创建并持有引用) ---
-    const box = document.getElementById('chat-box');
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = "flex justify-start italic text-slate-400 blinking mb-4";
-    loadingDiv.innerHTML = `<div class="bg-slate-50 p-2 rounded border border-dashed border-slate-300 text-xs">SRE Pipeline 运行中...</div>`;
-    box.appendChild(loadingDiv);
-    box.scrollTop = box.scrollHeight;
+        // 创建 AI 容器
+        const box = document.getElementById('chat-box');
+        const aiDiv = document.createElement('div');
+        aiDiv.className = "flex justify-start mb-4";
+        aiDiv.innerHTML = `
+            <div class="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm max-w-[85%] text-sm relative">
+                <div id="current-think" class="text-slate-400 italic mb-2 hidden border-l-2 border-slate-200 pl-3 py-1"></div>
+                <div id="current-answer" class="prose prose-sm prose-slate">正在调配 SRE 专家资源...</div>
+                <div id="current-debug" class="hidden mt-3 pt-2 border-t border-dashed border-slate-100 flex justify-end"></div>
+            </div>`;
+        box.appendChild(aiDiv);
+        box.scrollTop = box.scrollHeight;
 
-    try {
-        let serverFileName = "";
-        if (fileInput.files.length > 0) {
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            const upRes = await fetch('/upload', { method: 'POST', body: formData });
-            const upData = await upRes.json();
-            serverFileName = upData.filename;
+        const thinkArea = aiDiv.querySelector('#current-think');
+        const answerArea = aiDiv.querySelector('#current-answer');
+        const debugArea = aiDiv.querySelector('#current-debug');
+
+        try {
+            // A. 处理图片
+            let serverFileName = "";
+            if (fileInput.files.length > 0) {
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                const upRes = await fetch('/upload', { method: 'POST', body: formData });
+                const upData = await upRes.json();
+                serverFileName = upData.filename;
+            }
+
+            // B. 流式传输
+            const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(serverFileName)}`;
+            const response = await fetch(url);
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            let fullContent = "";
+            answerArea.innerText = ""; // 清空等待状态
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.replace('data: ', ''));
+                            
+                            // 1. 处理 Dist 分数 (Debug)
+                            if (data.debug_dist !== undefined) {
+                                debugArea.classList.remove('hidden');
+                                let status = data.debug_dist < 1.3 ? "🎯 知识命中" : "🌐 通用知识";
+                                let color = data.debug_dist < 1.3 ? "#2ecc71" : "#f1c40f";
+                                debugArea.innerHTML = `
+                                    <div class="text-[10px] font-mono flex items-center space-x-2">
+                                        <span style="color: ${color}; font-weight: bold;">${status}</span>
+                                        <span class="text-slate-300">|</span>
+                                        <span class="text-slate-400">Similarity: ${data.debug_dist.toFixed(4)}</span>
+                                    </div>`;
+                            }
+
+                            // 2. 处理文字流
+                            if (data.response) {
+                                fullContent += data.response;
+                                
+                                // 处理 <think> 标签逻辑
+                                if (fullContent.includes('<think>') && !fullContent.includes('</think>')) {
+                                    thinkArea.classList.remove('hidden');
+                                    let thinkText = fullContent.split('<think>')[1];
+                                    thinkArea.innerText = "🤔 思考中: " + (thinkText || "...");
+                                } else if (fullContent.includes('</think>')) {
+                                    let parts = fullContent.split('</think>');
+                                    thinkArea.innerText = "💡 思考路径: " + parts[0].replace('<think>', '').trim();
+                                    thinkArea.classList.replace('text-slate-400', 'text-slate-300');
+                                    answerArea.innerHTML = marked.parse(parts[1] || "");
+                                } else {
+                                    answerArea.innerHTML = marked.parse(fullContent);
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                }
+                box.scrollTop = box.scrollHeight;
+            }
+            
+            // 发送完成：亮起 GPU 灯
+            document.getElementById('status-gpu').classList.add('bg-green-500', 'blinking');
+            clearImage();
+
+        } catch (e) {
+            answerArea.innerHTML = `<span class="text-red-500 font-bold">❌ 系统故障: ${e.message}</span>`;
         }
-
-        const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(serverFileName)}`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        // --- 核心修复：移除 Loading 节点 ---
-        if (loadingDiv.parentNode) {
-            loadingDiv.parentNode.removeChild(loadingDiv);
-        }
-        
-        // 渲染带 Debug 信息的 AI 回复
-        appendMessage('ai', data.response, data.debug_dist);
-        
-        clearImage();
-        
-        // 可选：更新状态灯
-        updateStatusLights(data.response);
-
-    } catch (e) {
-        console.error("SRE Pipeline Error:", e);
-        loadingDiv.innerHTML = `<div class="bg-red-50 text-red-600 p-2 rounded text-xs">❌ 错误: ${e.message}</div>`;
-        loadingDiv.classList.remove('blinking');
     }
-}
 
-    // 搜索逻辑
+    // --- 4. 检索逻辑 ---
     async function searchHistory() {
         const q = document.getElementById('search-input').value.trim();
         const resultsBox = document.getElementById('search-results');
-        if (!q) { alert("请输入搜索关键词"); return; }
-        resultsBox.innerHTML = '<div class="text-center text-slate-400 py-4">正在检索...</div>';
+        if (!q) return;
+
+        resultsBox.innerHTML = '<div class="text-center text-slate-400 py-6 animate-pulse text-xs">正在穿透索引层...</div>';
+        
         try {
             const res = await fetch('/search?q=' + encodeURIComponent(q));
             const data = await res.json();
             resultsBox.innerHTML = '';
+            
             if (data.length === 0) {
-                resultsBox.innerHTML = '<div class="text-center text-slate-400 py-4">--- 未找到相关记录 ---</div>';
+                resultsBox.innerHTML = '<div class="text-center text-slate-400 py-4 text-xs">无匹配的历史案例</div>';
                 return;
             }
+            
             data.forEach(item => {
                 const div = document.createElement('div');
-                div.className = "p-2 mb-2 bg-yellow-50 rounded border border-yellow-200 text-xs";
-                div.innerHTML = `<div class="text-slate-500 text-[10px] mb-1">${item.time} | 搜索命中</div>
-                                 <b>问：</b>${item.prompt}<br>
-                                 <b>答：</b>${marked.parse(item.response)}`;
+                div.className = "p-2.5 bg-white rounded-lg border border-slate-200 text-[10px] hover:border-blue-400 transition cursor-help shadow-sm";
+                div.innerHTML = `
+                    <div class="text-slate-400 mb-1 flex justify-between">
+                        <span>📅 ${item.time}</span>
+                        <span class="text-blue-500 font-bold">MATCH</span>
+                    </div>
+                    <div class="line-clamp-2"><b>Q:</b> ${item.prompt}</div>
+                    <div class="line-clamp-2 text-slate-500 italic mt-1 border-t pt-1"><b>A:</b> ${item.response}</div>
+                `;
                 resultsBox.appendChild(div);
             });
-        } catch (e) { resultsBox.innerHTML = '<div class="text-center text-red-500 py-4">❌ 搜索接口故障</div>'; }
-    }
-
-    async function askAI(prompt, imageName) {
-    const response = await fetch(`/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${imageName}`);
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    
-    let fullText = "";
-    let aiMessageElement = createMessageElement("ai"); // 先创建一个空的 AI 回答框
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        // 解析 SSE 格式数据 (data: {...})
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-            if (line.startsWith('data: ')) {
-                const jsonStr = line.replace('data: ', '');
-                try {
-                    const data = JSON.parse(jsonStr);
-                    if (data.response) {
-                        fullText += data.response;
-                        // 实时渲染到页面，这里可以做简单的正则替换处理 <think> 标签
-                        aiMessageElement.innerHTML = renderMarkdown(fullText); 
-                    }
-                } catch (e) { console.error("解析错误", e); }
-            }
+        } catch (e) { 
+            resultsBox.innerHTML = '<div class="text-red-400 text-center py-4">检索接口离线</div>'; 
         }
     }
-    }
-
-    // 状态灯更新逻辑
-    function updateStatusLights(response) {
-        const light70b = document.getElementById('status-70b');
-        const lightGpu = document.getElementById('status-gpu');
-
-        if (response.includes('[GPU识图]')) {
-            lightGpu.classList.add('bg-green-500', 'blinking', 'shadow-md');
-            lightGpu.classList.remove('bg-slate-300');
-            light70b.classList.remove('blinking');
-        } else if (response.includes('[70B]')) {
-            light70b.classList.add('bg-green-500', 'blinking');
-            lightGpu.classList.remove('bg-green-500', 'blinking', 'shadow-md');
-            lightGpu.classList.add('bg-slate-300');
-        }
-    }
-
 </script>
 </body>
 </html>
