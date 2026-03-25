@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SRE AIOps 智能终端 - 70B/Qwen 视觉进化版</title>
+    <title>SRE AIOps 智能终端 - 70B/Qwen </title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
@@ -24,7 +24,7 @@
 
 <header class="bg-slate-900 text-white p-3 shadow-xl flex items-center justify-between">
     <div class="flex items-center space-x-3">
-        <h1 class="font-mono text-xl tracking-wider text-green-400">AIOPS-CORE v18_VISION</h1>
+        <h1 class="font-mono text-xl tracking-wider text-green-400">AIOPS-CORE ChenShuo_VISION</h1>
     </div>
     <div class="text-xs text-slate-400 font-mono text-right">
         Host: K3s Cluster | PVC: 500GB Ready | Node: 32C/128G + T4 GPU
@@ -37,7 +37,7 @@
         <div id="chat-box" class="flex-1 overflow-y-auto p-6 space-y-4">
             <div class="flex justify-start">
                 <div class="bg-white p-3 rounded-lg shadow-sm border border-slate-200 max-w-[80%] text-sm">
-                    你好，大哥！**v18 视觉版**已就绪。Llama3 70B 负责脑子，Qwen2-VL 负责眼睛。
+                    Welcome！**v18 视觉版**已就绪。有问题可以联系管理员
                     <br><br>你可以直接输入问题，或者**点击左下角上传故障截图**。
                 </div>
             </div>
@@ -95,6 +95,14 @@
             </div>
             <div id="search-results" class="flex-1 overflow-y-auto space-y-2 text-xs"></div>
         </div>
+        <div class="ai-response-container">
+            <p class="reply-text">{{AI_REPLY_CONTENT}}</p>
+            <div class="debug-info" style="font-size: 12px; color: #888; margin-top: 5px; text-align: right;">
+                <i class="fas fa-microchip"></i> 
+                语义距离 (Dist): <span class="dist-value" style="font-weight: bold; color: #2ecc71;">{{DEBUG_DIST}}</span>
+                <span class="rag-status" style="margin-left: 10px; font-style: italic;"></span>
+            </div>
+        </div>
     </aside>
 </div>
 
@@ -103,12 +111,34 @@
     marked.setOptions({ sanitize: true, breaks: true });
     let currentImageName = "";
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, dist = null) {
         const box = document.getElementById('chat-box');
         const div = document.createElement('div');
-        div.className = role === 'user' ? "flex justify-end" : "flex justify-start";
-        const bgColor = role === 'user' ? "bg-blue-500 text-white" : "bg-white border border-slate-200";
-        div.innerHTML = `<div class="${bgColor} p-3 rounded-lg shadow-sm max-w-[80%] text-sm">${role === 'user' ? content : marked.parse(content)}</div>`;
+        div.className = role === 'user' ? "flex justify-end" : "flex justify-start mb-4";
+        
+        const bgColor = role === 'user' ? "bg-blue-600 text-white" : "bg-white border border-slate-200";
+        
+        // 构建内容 HTML
+        let htmlContent = `<div class="${bgColor} p-3 rounded-lg shadow-sm max-w-[80%] text-sm relative">`;
+        htmlContent += role === 'user' ? content : marked.parse(content);
+        
+        // 如果是 AI 回复且有距离分值，加上 Debug 标签
+        if (role === 'ai' && dist !== null) {
+            let color = "#2ecc71"; // 默认绿色
+            let status = "🎯 知识命中";
+            if (dist > 1.3) { color = "#e74c3c"; status = "🌐 通用知识"; }
+            else if (dist > 1.1) { color = "#f1c40f"; status = "⚠️ 弱关联"; }
+
+            htmlContent += `
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 8px; border-top: 1px dashed #e2e8f0; pt-1; text-align: right;">
+                    <span style="color: ${color}; font-weight: bold;">${status}</span> | 
+                    Dist: <span style="font-family: monospace;">${dist.toFixed(4)}</span>
+                </div>`;
+        }
+        
+        htmlContent += `</div>`;
+        div.innerHTML = htmlContent;
+        
         box.appendChild(div);
         box.scrollTop = box.scrollHeight;
     }
@@ -140,61 +170,45 @@
         const fileInput = document.getElementById('file-input');
         const prompt = input.value.trim();
         
-        // 如果既没说话也没传图，直接返回
         if (!prompt && fileInput.files.length === 0) return;
 
-        // 1. UI 预处理
+        // UI 预显
         const tempFileName = fileInput.files.length > 0 ? fileInput.files[0].name : "";
         appendMessage('user', tempFileName ? `[图片:${tempFileName}] ${prompt}` : prompt);
         input.value = '';
 
-        // 2. 思考中状态
+        // 状态提示
         const box = document.getElementById('chat-box');
-        const aiMsg = document.createElement('div');
-        aiMsg.className = "flex justify-start italic text-slate-400 blinking";
-        aiMsg.innerHTML = `<div class="bg-slate-50 p-3 rounded-lg border border-dashed border-slate-300">SRE 系统处理中...</div>`;
-        box.appendChild(aiMsg);
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = "flex justify-start italic text-slate-400 blinking mb-4";
+        loadingDiv.innerHTML = `<div class="bg-slate-50 p-2 rounded border border-dashed border-slate-300 text-xs">SRE Pipeline 运行中...</div>`;
+        box.appendChild(loadingDiv);
         box.scrollTop = box.scrollHeight;
 
         try {
             let serverFileName = "";
-
-            // 3. 【关键步骤】物理上传
+            // 上传逻辑
             if (fileInput.files.length > 0) {
-                console.log(">>> [SRE Debug] 开始上传文件:", fileInput.files[0].name);
                 const formData = new FormData();
                 formData.append('file', fileInput.files[0]);
-
-                const upRes = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+                const upRes = await fetch('/upload', { method: 'POST', body: formData });
                 const upData = await upRes.json();
-
-                if (upData.status === 'success') {
-                    serverFileName = upData.filename; // 拿后端确认存好的名字
-                    console.log(">>> [SRE Debug] 后端已成功存储:", serverFileName);
-                } else {
-                    throw new Error("后端接收文件失败: " + upData.error);
-                }
+                serverFileName = upData.filename;
             }
 
-            // 4. 发起 AI 分析请求
+            // AI 请求
             const url = `/aigpt_api?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(serverFileName)}`;
             const res = await fetch(url);
             const data = await res.json();
 
-            // 5. 渲染结果
-            box.removeChild(aiMsg);
-            appendMessage('ai', data.response);
+            // 移除 Loading，渲染带 Debug 信息的 AI 回复
+            box.removeChild(loadingDiv);
+            appendMessage('ai', data.response, data.debug_dist);
             
-            // 6. 清理，准备下一轮
             clearImage();
-
         } catch (e) {
-            aiMsg.innerHTML = `<div class="bg-red-50 text-red-600 p-3 rounded border border-red-300">❌ 错误: ${e.message}</div>`;
-            aiMsg.classList.remove('blinking');
-            console.error(">>> [SRE Error] 链路故障:", e);
+            loadingDiv.innerHTML = `<div class="bg-red-50 text-red-600 p-2 rounded text-xs">❌ 链路异常: ${e.message}</div>`;
+            loadingDiv.classList.remove('blinking');
         }
     }
 
@@ -238,6 +252,35 @@
             lightGpu.classList.add('bg-slate-300');
         }
     }
+
+    fetch(`/aigpt_api?prompt=${encodeURIComponent(userPrompt)}&image=${imageName}`)
+    .then(response => response.json())
+    .then(data => {
+        const reply = data.response;
+        const dist = data.debug_dist; // 拿到后端传来的分数
+
+        // 渲染回复内容
+        appendMessage("ai", reply);
+
+        // 处理 Debug 信息显示
+        const lastMsg = document.querySelector('.ai-response-container:last-child');
+        const distElement = lastMsg.querySelector('.dist-value');
+        const statusElement = lastMsg.querySelector('.rag-status');
+
+        distElement.innerText = dist.toFixed(4);
+
+        // 根据距离判断状态并变色，增加视觉冲击力
+        if (dist <= 1.1) {
+            distElement.style.color = "#2ecc71"; // 绿色：精准命中
+            statusElement.innerText = "(🎯 知识库命中)";
+        } else if (dist <= 1.3) {
+            distElement.style.color = "#f1c40f"; // 黄色：模糊匹配
+            statusElement.innerText = "(⚠️ 弱关联)";
+        } else {
+            distElement.style.color = "#e74c3c"; // 红色：未命中
+            statusElement.innerText = "(🌐 通用知识模式)";
+        }
+    });
 </script>
 </body>
 </html>

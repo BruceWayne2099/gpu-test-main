@@ -25,6 +25,9 @@ VISION_MODEL = "qwen3.5:latest"
 IMAGE_DIR = "/app/user-images/"
 MODEL_CACHE_PATH = "/app/model_file/" # 确保 SentenceTransformer 在这里
 
+# L2 距离越小越匹配。通常 1.1 以下算精准，1.3 以上基本就是胡扯了。
+RAG_THRESHOLD = 1.1
+
 # --- 1. 向量引擎初始化 ---
 print(">>> [SRE] 正在加载 SentenceTransformer 模型...")
 # 设置 local_files_only=True 确保不连外网
@@ -39,20 +42,15 @@ vector_index = None
 all_chunks = []
 
 def build_vector_index():
-    """自动化构建/更新向量索引"""
     global vector_index, all_chunks
-    if not os.path.exists(KNOWLEDGE_DIR):
-        os.makedirs(KNOWLEDGE_DIR)
-        return
-
+    if not os.path.exists(KNOWLEDGE_DIR): os.makedirs(KNOWLEDGE_DIR)
+    
     local_chunks = []
-    print(f">>> [SRE] 扫描知识库路径: {KNOWLEDGE_DIR}")
     for filename in os.listdir(KNOWLEDGE_DIR):
         if filename.endswith(".txt") or filename.endswith(".md"):
             try:
                 with open(os.path.join(KNOWLEDGE_DIR, filename), 'r', encoding='utf-8') as f:
                     content = f.read()
-                    # 按照 300 字切片，保证检索粒度
                     step = 300
                     for i in range(0, len(content), step):
                         chunk_text = content[i : i + 350].strip()
@@ -64,33 +62,37 @@ def build_vector_index():
     if local_chunks:
         texts = [c['text'] for c in local_chunks]
         embeddings = embed_model.encode(texts)
-        dimension = embeddings.shape[1]
-        # 使用 L2 距离索引
-        index = faiss.IndexFlatL2(dimension)
+        index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(np.array(embeddings).astype('float32'))
         vector_index = index
         all_chunks = local_chunks
-        print(f">>> [Success] 知识库就绪！共加载 {len(all_chunks)} 个文本片段。")
-    else:
-        print(">>> [Warn] 知识库为空，请在 knowledge 目录下添加 .txt 文件。")
+        print(f">>> [Success] 知识库已就绪，共 {len(all_chunks)} 个切片。")
 
-# 启动时构建索引
 build_vector_index()
 
-def get_semantic_context(query_text, top_n=2):
-    """语义搜索核心：找到最相关的 txt 片段"""
+def get_semantic_context_with_score(query_text, top_n=2):
+    """
+    不仅返回文本，还返回最小距离评分
+    """
     if vector_index is None or not query_text:
-        return ""
+        return "", 999.0
     
     query_vec = embed_model.encode([query_text])
     distances, indices = vector_index.search(np.array(query_vec).astype('float32'), top_n)
     
+    min_dist = distances[0][0] if len(distances[0]) > 0 else 999.0
+    
+    # 如果距离超过阈值，直接判定为“未命中”，返回空字符串
+    if min_dist > RAG_THRESHOLD:
+        return "", min_dist
+
     retrieved_parts = []
     for idx in indices[0]:
         if idx != -1 and idx < len(all_chunks):
             chunk = all_chunks[idx]
-            retrieved_parts.append(f"【参考来源: {chunk['filename']}】\n内容: {chunk['text']}")
-    return "\n\n".join(retrieved_parts)
+            retrieved_parts.append(f"【参考来源: {chunk['filename']}】\n{chunk['text']}")
+    
+    return "\n\n".join(retrieved_parts), min_dist
 
 # --- 2. 数据库与工具函数 ---
 def init_db():
@@ -129,7 +131,7 @@ def aigpt_api():
     image_name = request.args.get('image', '')
 
     visual_keyword = ""
-    # --- 阶段 1: GPU 识图 (只有传了图才走这步) ---
+    # --- 阶段 1: 视觉解析 ---
     if image_name:
         img_path = os.path.join(IMAGE_DIR, image_name)
         if os.path.exists(img_path):
@@ -137,50 +139,49 @@ def aigpt_api():
                 with open(img_path, "rb") as f:
                     img_b64 = base64.b64encode(f.read()).decode('utf-8')
                 
-                # 强引导 Prompt：让 Qwen 只吐出关键词
-                v_prompt = "Identify the person or main object in this image. Output the name only (e.g., 'Yao Ming')."
-                
+                # 识图引导，让它只出名字/关键词
+                v_prompt = "Identify the core object or person in this image. Give me the name only."
                 r_vision = requests.post(OLLAMA_GPU_API, json={
-                    "model": VISION_MODEL,
-                    "prompt": v_prompt,
-                    "images": [img_b64],
-                    "stream": False
+                    "model": VISION_MODEL, "prompt": v_prompt,
+                    "images": [img_b64], "stream": False
                 }, timeout=45)
-                
                 visual_keyword = r_vision.json().get('response', '').strip()
-                print(f">>> [Vision] 识别结果: {visual_keyword}")
+                print(f">>> [Vision Log] 识图关键词: {visual_keyword}")
             except Exception as e:
-                print(f">>> [Error] 识图失败: {e}")
+                print(f">>> [Vision Error] {e}")
 
-    # --- 阶段 2: 向量检索 (RAG) ---
-    # 策略：如果有识图结果，优先用识别到的名字去检索知识库
+    # --- 阶段 2: 意图感知检索 (第一重保险落地) ---
     search_query = visual_keyword if visual_keyword else user_prompt
-    knowledge_context = get_semantic_context(search_query)
+    knowledge_context, dist_score = get_semantic_context_with_score(search_query)
 
-    # --- 阶段 3: CPU 70B 终极推理 ---
-    # 构造最终 Prompt
-    final_prompt = f"""你是一位专业的资深 SRE 助手。请结合以下信息回答。
-【视觉识别对象】: {visual_keyword if visual_keyword else '未提供图片'}
-【知识库参考】: 
-{knowledge_context if knowledge_context else '未匹配到相关文档'}
+    # --- 阶段 3: 动态 Prompt 构建 (第二重保险落地) ---
+    if knowledge_context:
+        # RAG 模式：知识库命中
+        print(f">>> [SRE Logic] 命中知识库 (Distance: {dist_score:.4f}) -> 启用 RAG 增强模式")
+        final_prompt = (
+            f"你是一位资深 SRE 专家。请结合以下参考资料回答问题。\n"
+            f"【参考资料】:\n{knowledge_context}\n\n"
+            f"【用户提问】: {user_prompt}\n"
+            f"请确保回答中包含参考资料的关键信息。"
+        )
+    else:
+        # 通用模式：知识库未命中
+        print(f">>> [SRE Logic] 知识库未命中 (Distance: {dist_score:.4f}) -> 启用通用推理模式")
+        final_prompt = (
+            f"你是一位资深 SRE 专家。请基于你的专业知识回答以下问题。\n"
+            f"【提问】: {user_prompt}"
+        )
 
-【用户提问】: {user_prompt}
-
-请用中文给出详细回答。如果参考资料里有具体文章内容（如“像姚明一样努力学习”），请务必在回答中引用。"""
-
+    # --- 阶段 4: 请求 CPU 70B ---
     try:
         r = requests.post(OLLAMA_CPU_API, json={
-            "model": PRIMARY_MODEL,
-            "prompt": final_prompt,
-            "stream": False
+            "model": PRIMARY_MODEL, "prompt": final_prompt, "stream": False
         }, timeout=300)
-        
-        final_ans = r.json().get('response', 'Master 节点未返回有效响应')
+        final_ans = r.json().get('response', '响应超时')
     except Exception as e:
-        final_ans = f"推理链路异常: {str(e)}"
+        final_ans = f"链路异常: {str(e)}"
 
-    save_history(f"[Vision:{visual_keyword}] {user_prompt}", final_ans, PRIMARY_MODEL)
-    return jsonify({"response": final_ans})
+    return jsonify({"response": final_ans, "debug_dist": float(dist_score)})
 
 if __name__ == '__main__':
     init_db()
