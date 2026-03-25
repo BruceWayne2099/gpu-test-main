@@ -1,0 +1,32 @@
+# 核心配置片段 (dcgm-exporter-ds.yaml)
+# kubectl create namespace monitoring
+apiVersion: apps/v1
+kind: DaemonSet #它的定义就是“在集群的每一个节点上运行一个 Pod 副本”。
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: monitoring
+spec:
+  # ① 必须声明 selector，匹配下面 template 的 labels
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+
+  # ② template 必须带上相同的 labels
+  template:
+    metadata:
+      labels:
+        app: nvidia-dcgm-exporter   # 与 selector.matchLabels 完全一致
+    spec:
+      # 如需使用 GPU 设备，需要在节点上开启特权模式
+      containers:
+        - name: nvidia-dcgm-exporter
+          image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.5-3.4.1-ubuntu22.04
+          ports:
+            - containerPort: 9400
+              name: metrics
+          securityContext:
+            runAsNonRoot: false
+            privileged: true   # 必须开启，否则拿不到底层硬件信息
+      # 若集群使用了特定的 runtime（如 nvidia），可在这里添加 nodeSelector / tolerations
+      # nodeSelector:
+      #   accelerator: nvidia-t4
