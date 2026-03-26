@@ -49,3 +49,18 @@ spec:
         - name: config-volume
           configMap:
             name: prometheus-config # 这里关联上面的 ConfigMap
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-core    # 这里的名字必须和你在 Grafana 填的域名一致
+  namespace: monitoring
+spec:
+  ports:
+    - port: 9090           # 集群内访问端口
+      targetPort: 9090     # Pod 监听端口
+      protocol: TCP
+  selector:
+    app: prometheus        # 必须匹配你 Prometheus Deployment 里的 label
+  type: ClusterIP          # 仅集群内部通信使用
