@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: nvidia-dcgm-exporter # 这个 Label 要和 ServiceMonitor 的 selector 对应
+spec:
+  ports:
+  - name: metrics
+    port: 9400
+    targetPort: 9400
+  selector:
+    app.kubernetes.io/name: nvidia-dcgm-exporter # 确保这里能勾选到你的 DaemonSet Pod
+  type: ClusterIP
