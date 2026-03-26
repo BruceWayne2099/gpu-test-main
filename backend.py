@@ -37,7 +37,7 @@ except Exception as e:
     embed_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
 try:
-    rerank_model = CrossEncoder('BAAI/bge-reranker-v2-m3', max_length=512)
+    rerank_model = CrossEncoder('/app/model_file/bge-reranker-v2-m3', max_length=512)
 except Exception as e:
     print(f">>> [Error] Reranker 加载失败: {e}")
 

@@ -6,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
 ENV LC_ALL=zh_CN.UTF-8
+ENV HF_ENDPOINT=https://hf-mirror.com   
+# 国内网不通huggingface,改用hf-mirror
 
 WORKDIR /app
 
