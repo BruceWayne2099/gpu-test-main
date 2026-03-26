@@ -144,6 +144,9 @@ def get_semantic_context_with_rerank(query_text, top_n_coarse=10, top_n_fine=2):
     # 扩大搜索范围，捞出 10 个备选
     coarse_scores, indices = vector_index.search(query_vec, top_n_coarse)
     
+    # 拿到海选最高分（由于你用了归一化 + IndexFlatIP，这是余弦相似度，0-1 之间）
+    max_coarse_score = float(coarse_scores[0][0]) if len(coarse_scores[0]) > 0 else 0.0
+
     candidate_chunks = []
     for idx in indices[0]:
         if idx != -1 and idx < len(all_chunks):
@@ -173,20 +176,20 @@ def get_semantic_context_with_rerank(query_text, top_n_coarse=10, top_n_fine=2):
     # 3. 结果过滤
     # BGE-Reranker 的分数通常需要一个阈值，比如 > -2.0 (视模型而定)
     # 我们取精排后的前 N 个
-    best_score = combined[0]['score']
-    print(f">>> [Rerank Debug] Query: {query_text} | Top Rerank Score: {best_score:.4f}", flush=True)
+    best_rerank_score = combined[0]['score']
+    print(f">>> [Rerank Debug] Query: {query_text} | Top Rerank Score: {best_rerank_score:.4f}", flush=True)
 
     # 设定精排阈值，防止“简历污染”
     RERANK_THRESHOLD = -1.0 # 这是一个经验值，可以根据测试调整
-    if best_score < RERANK_THRESHOLD:
-        return "", best_score
+    if best_rerank_score < RERANK_THRESHOLD:
+        return "", best_rerank_score
 
     retrieved_parts = []
     for item in combined[:top_n_fine]:
         c = item['chunk']
         retrieved_parts.append(f"【参考来源: {c['filename']}】\n{c['text']}")
         
-    return "\n\n".join(retrieved_parts), best_score
+    return "\n\n".join(retrieved_parts), max_coarse_score, best_rerank_score
 
 # --- 3. 路由定义 ---
 
@@ -233,7 +236,7 @@ def aigpt_api():
     # --- 阶段 2: 语义检索 (RAG) ---
     # 如果有视觉关键词，优先用关键词检索，否则用用户原话
     search_query = visual_keyword if visual_keyword else user_prompt
-    knowledge_context, dist_score = get_semantic_context_with_rerank(search_query) # 这里用到rerank
+    knowledge_context, coarse_dist, rerank_score = get_semantic_context_with_rerank(search_query) # 这里用到rerank
 
     # --- 阶段 3: 强化型 Prompt 组装 ---
     # 这里加了“死命令”，强制模型必须先看参考资料
@@ -257,7 +260,10 @@ def aigpt_api():
     # --- 阶段 4: 构建流式生成器 ---
     def generate():
         # 重要：先发一个包含距离分数的数据包，让前端显示 Dist 标签
-        dist_packet = {"debug_dist": float(dist_score)}
+        dist_packet = {
+            "coarse_dist": float(coarse_dist), 
+            "rerank_score": float(rerank_score)
+        }
         yield f"data: {json.dumps(dist_packet)}\n\n"
 
         payload = {
