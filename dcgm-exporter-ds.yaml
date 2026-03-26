@@ -28,5 +28,5 @@ spec:
             runAsNonRoot: false
             privileged: true   # 必须开启，否则拿不到底层硬件信息
       # 若集群使用了特定的 runtime（如 nvidia），可在这里添加 nodeSelector / tolerations
-      # nodeSelector:
-      #   accelerator: nvidia-t4
+      nodeSelector:
+        accelerator: nvidia-t4
