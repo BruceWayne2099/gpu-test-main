@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-storage-pvc
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce  # 单节点读写，适合这种模型推理场景
+  resources:
+    requests:
+      storage: 50Gi 
