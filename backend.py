@@ -253,7 +253,7 @@ def aigpt_api():
 
 【用户提问】: {user_prompt}
 
-请结合手册给出诊断建议（如果是关于姚明或学习的，请务必引用手册中的核心语录）："""
+请结合手册给出诊断建议（如何是内部文档关键词，请务必引用手册中的核心语录）："""
     else:
         prompt_content = f"{system_prompt}\n\n【用户提问】: {user_prompt}"
 
