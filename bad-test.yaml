@@ -1,0 +1,12 @@
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: troubleshooting-test-pod
+  labels:
+    app: diagnostic-test
+spec:
+  containers:
+  - name: broken-container
+    image: nginx:this-tag-does-not-exist-12345  # 这是一个不存在的镜像
+EOF
